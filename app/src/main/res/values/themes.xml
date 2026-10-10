@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Bars are transparent and the window background is the app background (set again in code from the app theme,
+         see ConfigureSystemBars), so nothing of the platform theme can show as a grey strip behind the status bar. -->
+    <style name="Theme.LocalPlayer" parent="android:Theme.Material.Light.NoActionBar">
+        <item name="android:windowBackground">@android:color/white</item>
+        <item name="android:statusBarColor">@android:color/transparent</item>
+        <item name="android:navigationBarColor">@android:color/transparent</item>
+    </style>
+</resources>

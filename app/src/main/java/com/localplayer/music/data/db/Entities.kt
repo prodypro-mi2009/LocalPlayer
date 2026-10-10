@@ -1,0 +1,139 @@
+package com.localplayer.music.data.db
+
+import androidx.room.ColumnInfo
+import androidx.room.Entity
+import androidx.room.ForeignKey
+import androidx.room.Index
+import androidx.room.PrimaryKey
+
+/** Where MediaStore registered the file. Both kinds are played as music tracks. */
+object MediaKind {
+    const val AUDIO = 0
+    /** MP4 files Android classified as video; only their audio track is used. */
+    const val VIDEO = 1
+}
+
+/**
+ * CACHE/INDEX of one audio file. The audio FILE is the source of truth for every tag below;
+ * these columns are copies, rebuilt from the file on every (re)scan and after every verified
+ * metadata write. Nothing here may override what the file says.
+ *
+ * Track identity is [uri] (a MediaStore item URI that stays the same when tags are edited).
+ */
+@Entity(
+    tableName = "tracks",
+    indices = [
+        Index(value = ["uri"], unique = true),
+        Index(value = ["title"]),
+        Index(value = ["primaryArtistKey"]),
+        Index(value = ["albumGroupKey"]),
+        Index(value = ["genreKey"]),
+        Index(value = ["year"]),
+        Index(value = ["titleSort"]),
+    ],
+)
+data class TrackEntity(
+    @PrimaryKey(autoGenerate = true) val id: Long = 0,
+    val uri: String,
+    /** One of [MediaKind]. */
+    val mediaType: Int,
+    val displayName: String,
+    val mimeType: String?,
+    val sizeBytes: Long,
+    val lastModified: Long,
+    val title: String,
+    val artist: String?,
+    val albumArtist: String?,
+    val album: String?,
+    val genre: String?,
+    val year: Int?,
+    val trackNumber: Int?,
+    val discNumber: Int?,
+    val durationMs: Long,
+    val hasArtwork: Boolean,
+    /** False when playback failed because the file vanished or became unreadable. */
+    val isAvailable: Boolean = true,
+    /** True for MP4 files from the video collection that do not look like music. */
+    val isExcluded: Boolean = false,
+    val scannedAt: Long,
+
+    // --- added in database version 4 (all derived from the tags above) ---
+    /** Library "artist" this track is filed under (user's classification override, else the automatic one). */
+    val primaryArtist: String? = null,
+    val primaryArtistKey: String? = null,
+    /** Result of the automatic primary-artist parser, kept so an override can be cleared. */
+    val autoPrimaryArtist: String? = null,
+    val albumKey: String? = null,
+    val albumGroupKey: String? = null,
+    val genreKey: String? = null,
+    val titleSort: String? = null,
+    val artistSort: String? = null,
+    val albumSort: String? = null,
+    @ColumnInfo(defaultValue = "0") val dateAdded: Long = 0,
+    /** Version of the derivation rules used for this row; a mismatch forces a re-read of the file. */
+    @ColumnInfo(defaultValue = "0") val indexVersion: Int = 0,
+)
+
+/** App data: a user playlist. */
+@Entity(tableName = "playlists")
+data class PlaylistEntity(
+    @PrimaryKey(autoGenerate = true) val id: Long = 0,
+    val name: String,
+    val createdAt: Long,
+    val updatedAt: Long,
+)
+
+/**
+ * App data: playlist membership and order. Tracks are referenced by their stable URI (not by the
+ * cache row id), so a playlist survives a re-index, and one track can be in a playlist only once.
+ */
+@Entity(
+    tableName = "playlist_tracks",
+    primaryKeys = ["playlistId", "trackUri"],
+    foreignKeys = [
+        ForeignKey(
+            entity = PlaylistEntity::class,
+            parentColumns = ["id"],
+            childColumns = ["playlistId"],
+            onDelete = ForeignKey.CASCADE,
+        ),
+    ],
+    indices = [
+        Index(value = ["playlistId", "position"]),
+        Index(value = ["trackUri"]),
+    ],
+)
+data class PlaylistTrackEntity(
+    val playlistId: Long,
+    val trackUri: String,
+    val position: Int,
+    val addedAt: Long,
+)
+
+/** App data: one meaningful play of a track. */
+@Entity(
+    tableName = "listening_history",
+    indices = [Index(value = ["playedAt"]), Index(value = ["trackUri"])],
+)
+data class HistoryEntity(
+    @PrimaryKey(autoGenerate = true) val id: Long = 0,
+    val trackUri: String,
+    val playedAt: Long,
+)
+
+/** App data: a favourite song. Referenced by the stable track URI, so it survives re-indexing and tag edits. */
+@Entity(tableName = "favorites")
+data class FavoriteEntity(
+    @PrimaryKey val trackUri: String,
+    val addedAt: Long,
+)
+
+/**
+ * App data: the user's choice of which artist a track is FILED under in the library.
+ * This is a classification rule of this app, NOT file metadata: the file's Artist tag is untouched.
+ */
+@Entity(tableName = "primary_artist_overrides")
+data class PrimaryArtistOverrideEntity(
+    @PrimaryKey val trackUri: String,
+    val primaryArtist: String,
+)
