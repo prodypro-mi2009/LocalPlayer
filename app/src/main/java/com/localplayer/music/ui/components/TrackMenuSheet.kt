@@ -38,6 +38,7 @@ class TrackMenuActions(
     val onGoToArtist: () -> Unit,
     val onEditTag: () -> Unit,
     val onEditLyrics: () -> Unit,
+    val onHide: () -> Unit,
 )
 
 /**
@@ -47,6 +48,8 @@ class TrackMenuActions(
  *   Go to queue / Go to album / Go to artist
  *   ---
  *   Edit tag / Edit lyrics
+ *   ---
+ *   Hide song (library only: the file is not deleted)
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -105,6 +108,9 @@ fun TrackMenuSheet(track: TrackListItem, actions: TrackMenuActions, onDismiss: (
 
             Entry(AppIcons.Edit, stringResource(R.string.edit_tag), actions.onEditTag)
             Entry(AppIcons.Lyrics, stringResource(R.string.edit_lyrics), actions.onEditLyrics)
+            HorizontalDivider(Modifier.padding(vertical = 8.dp))
+
+            Entry(AppIcons.VisibilityOff, stringResource(R.string.hide_song), actions.onHide)
         }
     }
 }

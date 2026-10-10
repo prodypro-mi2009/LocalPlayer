@@ -4,6 +4,7 @@ import android.content.ContentUris
 import android.content.Context
 import android.net.Uri
 import android.provider.MediaStore
+import com.localplayer.music.data.db.LibraryFolderEntity
 import com.localplayer.music.data.db.MediaKind
 import com.localplayer.music.data.db.SearchIndex
 import com.localplayer.music.data.db.TrackDao
@@ -36,6 +37,9 @@ class LibraryScanner(
 
     suspend fun scanAll() = coordinator.run { runPass() }
 
+    /** One MediaStore pass, to be called inside [ScanCoordinator.run]. */
+    suspend fun pass() = runPass()
+
     private data class FoundMedia(
         val uri: Uri,
         val displayName: String,
@@ -43,6 +47,7 @@ class LibraryScanner(
         val lastModified: Long,
         val dateAdded: Long,
         val size: Long,
+        val folderKey: String?,
     )
 
     private suspend fun runPass() {
@@ -54,17 +59,58 @@ class LibraryScanner(
             return
         }
         coordinator.update { it.copy(discovered = found.size) }
-        sync(found)
+        sync(found, owns = { FolderKeys.isMediaStoreUri(it) }, keep = { false })
     }
 
-    private suspend fun sync(found: List<FoundMedia>) {
+    /**
+     * Indexes the folders the user granted through the system folder picker (not listed by MediaStore, or
+     * listed but not readable by path). Runs after the MediaStore pass inside the same scan. A folder that
+     * cannot be read completely never causes its songs to be removed.
+     */
+    suspend fun passFolders(folders: List<LibraryFolderEntity>, access: FolderAccess) {
+        val seen = HashSet<String>()
+        for (f in trackDao.mediaStoreFiles()) seen.add(f.folderKey + f.displayName)
+        val found = ArrayList<FoundMedia>()
+        val unsafePrefixes = ArrayList<String>()
+        for (folder in folders) {
+            val prefix = FolderAccess.rowPrefix(folder.treeUri)
+            val walk = withContext(Dispatchers.IO) { access.walk(Uri.parse(folder.treeUri)) }
+            if (walk == null || !walk.complete) unsafePrefixes.add(prefix)
+            if (walk == null) {
+                coordinator.fail(ScanFailureKind.QUERY_FAILED, folder.label)
+                continue
+            }
+            for (file in walk.files) {
+                if (!seen.add((file.folderKey ?: "") + file.displayName)) continue
+                found.add(
+                    FoundMedia(
+                        uri = file.uri,
+                        displayName = file.displayName,
+                        mimeType = file.mimeType,
+                        lastModified = file.lastModified,
+                        dateAdded = file.lastModified,
+                        size = file.size,
+                        folderKey = file.folderKey,
+                    ),
+                )
+            }
+        }
+        coordinator.update { it.copy(discovered = it.discovered + found.size) }
+        sync(
+            found,
+            owns = { !FolderKeys.isMediaStoreUri(it) },
+            keep = { uri -> unsafePrefixes.any { uri.startsWith(it) } },
+        )
+    }
+
+    private suspend fun sync(found: List<FoundMedia>, owns: (String) -> Boolean, keep: (String) -> Boolean) {
         val existing = trackDao.getSyncInfo().associateBy { it.uri }
         val foundUris = HashSet<String>(found.size * 2)
         for (file in found) foundUris.add(file.uri.toString())
 
         // Files MediaStore no longer lists, and anything left over from the old video-aware versions.
         val deletedIds = existing.values
-            .filter { it.uri !in foundUris || it.mediaType != MediaKind.AUDIO }
+            .filter { owns(it.uri) && (it.uri !in foundUris && !keep(it.uri) || it.mediaType != MediaKind.AUDIO) }
             .map { it.id }
         for (chunk in deletedIds.chunked(SQL_CHUNK)) trackDao.deleteByIds(chunk)
         searchIndex.delete(deletedIds)
@@ -80,7 +126,19 @@ class LibraryScanner(
                 old.sizeBytes != file.size ||
                 old.indexVersion != TrackIndexing.INDEX_VERSION
         }
-        coordinator.update { it.copy(toProcess = toProcess.size) }
+        // Rows that are up to date but predate folder keys (or whose file moved): cheap update, no re-read.
+        val processUris = toProcess.mapTo(HashSet()) { it.uri.toString() }
+        val folderFixes = HashMap<String, MutableList<Long>>()
+        for (file in found) {
+            val key = file.folderKey ?: continue
+            val old = existing[file.uri.toString()] ?: continue
+            if (old.folderKey != key && file.uri.toString() !in processUris) {
+                folderFixes.getOrPut(key) { mutableListOf() }.add(old.id)
+            }
+        }
+        for ((key, ids) in folderFixes) for (chunk in ids.chunked(SQL_CHUNK)) trackDao.setFolderKey(key, chunk)
+
+        coordinator.update { it.copy(toProcess = it.toProcess + toProcess.size) }
         if (toProcess.isEmpty()) return
 
         val groupNames = trackDao.distinctAlbumArtists().mapNotNull { TextNormalizer.groupKey(it) }.toHashSet()
@@ -149,6 +207,7 @@ class LibraryScanner(
                         albumSort = derived.albumSort,
                         dateAdded = file.dateAdded,
                         indexVersion = TrackIndexing.INDEX_VERSION,
+                        folderKey = file.folderKey,
                     ),
                 )
             }
@@ -190,7 +249,7 @@ class LibraryScanner(
             MediaStore.MediaColumns.SIZE,
             MediaStore.MediaColumns.DATE_MODIFIED,
             MediaStore.MediaColumns.DATE_ADDED,
-        ) + flagColumns.toTypedArray()
+        ) + flagColumns.toTypedArray() + MediaStoreAudio.folderColumns().toTypedArray()
 
         val cursor = (
             try {
@@ -209,6 +268,7 @@ class LibraryScanner(
             val modifiedCol = c.getColumnIndexOrThrow(MediaStore.MediaColumns.DATE_MODIFIED)
             val addedCol = c.getColumnIndexOrThrow(MediaStore.MediaColumns.DATE_ADDED)
             val flagCols = flagColumns.map { c.getColumnIndexOrThrow(it) }
+            val folderCols = MediaStoreAudio.folderColumns().map { c.getColumnIndexOrThrow(it) }
 
             while (c.moveToNext()) {
                 val name = c.getString(nameCol) ?: ""
@@ -223,6 +283,7 @@ class LibraryScanner(
                         lastModified = c.getLong(modifiedCol) * 1000L,
                         dateAdded = c.getLong(addedCol) * 1000L,
                         size = c.getLong(sizeCol),
+                        folderKey = MediaStoreAudio.folderKey(c, folderCols[0], folderCols.getOrElse(1) { -1 }),
                     ),
                 )
             }

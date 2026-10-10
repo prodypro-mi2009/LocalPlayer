@@ -7,6 +7,7 @@ import com.localplayer.music.data.artwork.BackgroundRepository
 import com.localplayer.music.data.audio.AudioSpecReader
 import com.localplayer.music.data.db.AppDatabase
 import com.localplayer.music.data.db.SearchIndex
+import com.localplayer.music.data.library.FolderAccess
 import com.localplayer.music.data.library.LibraryRepository
 import com.localplayer.music.data.library.LibraryScanner
 import com.localplayer.music.data.library.MediaStoreFastScanner
@@ -47,10 +48,11 @@ class AppContainer(val appContext: Context) {
     private val fastScanner: MediaStoreFastScanner by lazy {
         MediaStoreFastScanner(appContext, database.trackDao(), searchIndex, coordinator)
     }
+    private val folderAccess: FolderAccess by lazy { FolderAccess(appContext) }
     val library: LibraryRepository by lazy {
-        LibraryRepository(database, scanner, fastScanner, coordinator, settings, searchIndex)
+        LibraryRepository(database, scanner, fastScanner, coordinator, settings, searchIndex, folderAccess)
     }
-    val metadata: MetadataRepository by lazy { MetadataRepository(appContext, database, searchIndex) }
+    val metadata: MetadataRepository by lazy { MetadataRepository(appContext, database, searchIndex) { artwork.invalidate(it) } }
     val audioSpecs: AudioSpecReader by lazy { AudioSpecReader(appContext) }
     val background: BackgroundRepository by lazy { BackgroundRepository(appContext, settings) }
     val playerConnection: PlayerConnection by lazy { PlayerConnection(appContext) }

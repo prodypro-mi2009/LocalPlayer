@@ -77,6 +77,7 @@ import com.localplayer.music.ui.components.GenreStyle
 import com.localplayer.music.ui.components.LibraryActionRow
 import com.localplayer.music.ui.components.LibraryTab
 import com.localplayer.music.ui.components.NameDialog
+import com.localplayer.music.ui.components.NewPlaylistFlow
 import com.localplayer.music.ui.components.SongGridCard
 import com.localplayer.music.ui.components.SongMenuController
 import com.localplayer.music.ui.components.SortOption
@@ -728,18 +729,7 @@ private fun PlaylistsTab(viewModel: LibraryViewModel, nav: NavState) {
             }
         }
     }
-    if (creating) {
-        NameDialog(
-            title = stringResource(R.string.new_playlist),
-            initial = "",
-            confirmLabel = stringResource(R.string.create),
-            onConfirm = {
-                viewModel.createPlaylist(it)
-                creating = false
-            },
-            onDismiss = { creating = false },
-        )
-    }
+    if (creating) NewPlaylistFlow(viewModel, onDismiss = { creating = false })
 }
 
 @Composable

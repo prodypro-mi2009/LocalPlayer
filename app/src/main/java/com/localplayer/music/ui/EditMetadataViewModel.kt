@@ -7,6 +7,9 @@ import androidx.lifecycle.viewModelScope
 import com.localplayer.music.AppContainer
 import com.localplayer.music.R
 import com.localplayer.music.data.db.TrackListItem
+import androidx.compose.ui.graphics.asImageBitmap
+import com.localplayer.music.data.metadata.ArtworkChange
+import com.localplayer.music.data.metadata.CoverImage
 import com.localplayer.music.data.metadata.FailureKind
 import com.localplayer.music.data.metadata.MetadataChanges
 import com.localplayer.music.data.metadata.MetadataException
@@ -23,6 +26,7 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.receiveAsFlow
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 /** A failure shown to the user: what kind, plus the technical detail. */
 data class EditIssue(val kind: FailureKind, val detail: String)
@@ -72,6 +76,7 @@ class EditMetadataViewModel(
     val events: Flow<EditEvent> = _events.receiveAsFlow()
 
     private var pendingChanges: MetadataChanges? = null
+    private var pendingArtwork: ArtworkChange? = null
     private var trackUri: String? = null
 
     init {
@@ -148,7 +153,52 @@ class EditMetadataViewModel(
         viewModelScope.launch { proceed(changes) }
     }
 
-    private suspend fun proceed(changes: MetadataChanges) {
+    /** Cover picture chosen by the user and already prepared (JPEG), shown as a preview before saving. */
+    class CoverChoice(val prepared: CoverImage.Prepared, val preview: androidx.compose.ui.graphics.ImageBitmap)
+
+    private val _cover = MutableStateFlow<CoverChoice?>(null)
+    val cover: StateFlow<CoverChoice?> = _cover.asStateFlow()
+
+    /** Decodes the picked picture; shows [EditIssue] (INVALID_INPUT) when it cannot be read. */
+    fun chooseCover(uri: Uri) {
+        viewModelScope.launch {
+            val choice = withContext(kotlinx.coroutines.Dispatchers.IO) {
+                CoverImage.prepare(container.appContext, uri)?.let { prepared ->
+                    val bitmap = android.graphics.BitmapFactory.decodeByteArray(prepared.bytes, 0, prepared.bytes.size)
+                    bitmap?.let { CoverChoice(prepared, it.asImageBitmap()) }
+                }
+            }
+            if (choice == null) {
+                _state.value = _state.value.copy(issue = EditIssue(FailureKind.INVALID_INPUT, "The picture could not be read."))
+            } else {
+                _cover.value = choice
+                _state.value = _state.value.copy(issue = null)
+            }
+        }
+    }
+
+    fun clearCoverChoice() {
+        _cover.value = null
+    }
+
+    /** Writes the chosen picture as the only embedded cover (verified by reading the file back). */
+    fun saveCover() {
+        val choice = _cover.value ?: return
+        startArtworkSave(
+            ArtworkChange.Set(choice.prepared.bytes, choice.prepared.mimeType, choice.prepared.width, choice.prepared.height),
+        )
+    }
+
+    /** Removes every embedded picture from the file. */
+    fun removeCover() = startArtworkSave(ArtworkChange.Remove)
+
+    private fun startArtworkSave(change: ArtworkChange) {
+        val current = _state.value
+        if (!current.canEdit || current.saving) return
+        viewModelScope.launch { proceed(emptyMap(), change) }
+    }
+
+    private suspend fun proceed(changes: MetadataChanges, artwork: ArtworkChange? = null) {
         val uri = trackUri ?: container.library.trackItem(trackId)?.uri
         if (uri == null) {
             fail(FailureKind.FILE_UNAVAILABLE, "")
@@ -156,13 +206,15 @@ class EditMetadataViewModel(
         }
         _state.value = _state.value.copy(saving = true, issue = null, noChanges = false)
         when (val access = repository.checkWriteAccess(Uri.parse(uri))) {
-            WriteAccess.Granted -> write(changes)
+            WriteAccess.Granted -> write(changes, artwork)
             is WriteAccess.NeedsConsent -> {
                 pendingChanges = changes
+                pendingArtwork = artwork
                 _events.send(EditEvent.RequestConsent(access.intentSender))
             }
             WriteAccess.NeedsLegacyPermission -> {
                 pendingChanges = changes
+                pendingArtwork = artwork
                 _events.send(EditEvent.RequestLegacyPermission)
             }
             is WriteAccess.Denied -> fail(access.kind, access.detail)
@@ -172,7 +224,9 @@ class EditMetadataViewModel(
     /** Result of the system write-consent dialog (or of the legacy storage permission request). */
     fun onAccessResult(granted: Boolean) {
         val changes = pendingChanges ?: return
+        val artwork = pendingArtwork
         pendingChanges = null
+        pendingArtwork = null
         if (!granted) {
             fail(FailureKind.USER_CANCELLED, "")
             return
@@ -180,18 +234,19 @@ class EditMetadataViewModel(
         viewModelScope.launch {
             val uri = trackUri ?: return@launch fail(FailureKind.FILE_UNAVAILABLE, "")
             when (val access = repository.checkWriteAccess(Uri.parse(uri))) {
-                WriteAccess.Granted -> write(changes)
+                WriteAccess.Granted -> write(changes, artwork)
                 is WriteAccess.Denied -> fail(access.kind, access.detail)
                 else -> fail(FailureKind.WRITE_PERMISSION_DENIED, "")
             }
         }
     }
 
-    private suspend fun write(changes: MetadataChanges) {
+    private suspend fun write(changes: MetadataChanges, artwork: ArtworkChange? = null) {
         val mediaId = trackId.toString()
         val handle = player.beginFileEdit(mediaId)
         try {
-            repository.save(trackId, changes)
+            repository.save(trackId, changes, artwork)
+            if (artwork != null) _cover.value = null
             // Fresh item built from the refreshed cache, so queue + notification show the new tags.
             player.finishFileEdit(handle, mediaId, freshMediaItem())
             // Re-read what is REALLY in the file now, so reopening shows the saved content and a second save

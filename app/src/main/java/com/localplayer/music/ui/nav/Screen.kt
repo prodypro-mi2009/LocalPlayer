@@ -19,6 +19,11 @@ sealed interface Screen {
     data class Playlist(val id: Long) : Screen
     data class AddTracks(val playlistId: Long) : Screen
     data class EditMetadata(val trackId: Long) : Screen
+    data class EditCover(val trackId: Long) : Screen
+    /** Songs the user hid from the library, with "show again". */
+    data object HiddenSongs : Screen
+    /** Library folders: granted folders, folders switched off, rescan. */
+    data object LibraryFolders : Screen
 }
 
 private const val SEP = "\u0001"
@@ -38,6 +43,9 @@ fun Screen.encode(): String = when (this) {
     is Screen.Playlist -> listOf("playlist", id.toString()).joinToString(SEP)
     is Screen.AddTracks -> listOf("addtracks", playlistId.toString()).joinToString(SEP)
     is Screen.EditMetadata -> listOf("edit", trackId.toString()).joinToString(SEP)
+    is Screen.EditCover -> listOf("editcover", trackId.toString()).joinToString(SEP)
+    Screen.HiddenSongs -> "hidden"
+    Screen.LibraryFolders -> "folders"
 }
 
 fun decodeScreen(text: String): Screen {
@@ -57,6 +65,9 @@ fun decodeScreen(text: String): Screen {
             "playlist" -> Screen.Playlist(parts[1].toLong())
             "addtracks" -> Screen.AddTracks(parts[1].toLong())
             "edit" -> Screen.EditMetadata(parts[1].toLong())
+            "editcover" -> Screen.EditCover(parts[1].toLong())
+            "hidden" -> Screen.HiddenSongs
+            "folders" -> Screen.LibraryFolders
             else -> Screen.Home
         }
     } catch (e: Exception) {

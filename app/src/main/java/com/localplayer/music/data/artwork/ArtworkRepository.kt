@@ -95,6 +95,19 @@ class ArtworkRepository(private val context: Context) {
         }
     }
 
+    /**
+     * Forgets everything known about one track's picture (memory, disk thumbnails, "no picture" and failure marks).
+     * Called after the cover inside the file was changed, because the file's modification stamp may not have
+     * changed yet in MediaStore and the old "no picture" answer would otherwise be reused.
+     */
+    fun invalidate(trackId: Long) {
+        val prefix = "${trackId}_"
+        missing.removeAll { it.startsWith(prefix) }
+        failures.keys.removeAll { it.startsWith(prefix) }
+        for (key in memoryCache.snapshot().keys) if (key.startsWith(prefix)) memoryCache.remove(key)
+        diskDir.listFiles()?.forEach { if (it.name.startsWith(prefix)) it.delete() }
+    }
+
     /** Keeps the on-disk thumbnail cache under a size limit by deleting the oldest files. */
     suspend fun trimDisk(maxBytes: Long = 64L * 1024 * 1024) = withContext(Dispatchers.IO) {
         val files = diskDir.listFiles() ?: return@withContext

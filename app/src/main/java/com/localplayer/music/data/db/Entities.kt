@@ -72,6 +72,10 @@ data class TrackEntity(
     @ColumnInfo(defaultValue = "0") val dateAdded: Long = 0,
     /** Version of the derivation rules used for this row; a mismatch forces a re-read of the file. */
     @ColumnInfo(defaultValue = "0") val indexVersion: Int = 0,
+
+    // --- added in database version 6 ---
+    /** Folder the file is in (see FolderKeys). Null until the first scan after the upgrade fills it in. */
+    val folderKey: String? = null,
 )
 
 /** App data: a user playlist. */
@@ -81,6 +85,15 @@ data class PlaylistEntity(
     val name: String,
     val createdAt: Long,
     val updatedAt: Long,
+    // --- added in database version 6: a playlist that mirrors a folder (all null/0 for a normal playlist) ---
+    val sourceFolderKey: String? = null,
+    val sourceFolderLabel: String? = null,
+    @ColumnInfo(defaultValue = "1") val sourceIncludesSubfolders: Boolean = true,
+    @ColumnInfo(defaultValue = "0") val folderSyncedAt: Long = 0,
+    @ColumnInfo(defaultValue = "0") val folderSyncAdded: Int = 0,
+    @ColumnInfo(defaultValue = "0") val folderSyncRemoved: Int = 0,
+    /** 0 = in step with the folder, 1 = the folder looked empty/unreadable at the last sync and nothing was removed. */
+    @ColumnInfo(defaultValue = "0") val folderSyncStatus: Int = 0,
 )
 
 /**
@@ -136,4 +149,35 @@ data class FavoriteEntity(
 data class PrimaryArtistOverrideEntity(
     @PrimaryKey val trackUri: String,
     val primaryArtist: String,
+)
+
+/**
+ * App data: a song the user hid from the library. Keyed by the track URI, so it survives re-scans.
+ * The file is never touched. [displayName] and [sizeBytes] let a moved file be recognised again.
+ */
+@Entity(tableName = "hidden_tracks")
+data class HiddenTrackEntity(
+    @PrimaryKey val trackUri: String,
+    val hiddenAt: Long,
+    val displayName: String?,
+    val sizeBytes: Long?,
+)
+
+/** App data: a folder (and everything below it) the user switched off in the library. [prefix] is a folder key. */
+@Entity(tableName = "excluded_folders")
+data class ExcludedFolderEntity(
+    @PrimaryKey val prefix: String,
+    val excludedAt: Long,
+)
+
+/**
+ * App data: a folder the user granted access to through the system folder picker (persisted URI permission).
+ * Its songs are indexed in addition to what MediaStore lists.
+ */
+@Entity(tableName = "library_folders")
+data class LibraryFolderEntity(
+    @PrimaryKey val treeUri: String,
+    val folderKey: String,
+    val label: String,
+    val addedAt: Long,
 )

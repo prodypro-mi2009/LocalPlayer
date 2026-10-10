@@ -1,5 +1,7 @@
 package com.localplayer.music.ui.player
 
+import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.material3.DropdownMenu
 import androidx.activity.compose.BackHandler
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.SizeTransform
@@ -90,6 +92,7 @@ fun NowPlayingScreen(
     onDismiss: () -> Unit,
     onOpenQueue: () -> Unit,
     onOpenLyrics: () -> Unit,
+    onMenuAction: (NowPlayingAction, NowPlaying) -> Unit,
 ) {
     val state by viewModel.playerState.collectAsStateWithLifecycle()
     // Keep showing the last track while the screen slides out after the queue was cleared.
@@ -201,6 +204,7 @@ fun NowPlayingScreen(
                                 )
                             }
                             FavoriteButton(viewModel, track.uri)
+                            NowPlayingOverflowMenu(onAction = { onMenuAction(it, track) })
                         }
                     }
                 }
@@ -421,4 +425,37 @@ private fun SleepTimerDialog(viewModel: LibraryViewModel, state: SleepTimerState
         },
         dismissButton = { TextButton(onClick = onDismiss) { Text(stringResource(R.string.cancel)) } },
     )
+}
+
+/** The actions of the Now Playing overflow menu (exactly these six, in this order). */
+enum class NowPlayingAction { GoToAlbum, GoToArtist, HideSong, EditTags, EditLyrics, EditCover }
+
+/** Three vertical dots next to the heart. Every entry is wired to a real screen or action by the caller. */
+@Composable
+fun NowPlayingOverflowMenu(onAction: (NowPlayingAction) -> Unit) {
+    var open by remember { mutableStateOf(false) }
+    Box {
+        IconButton(onClick = { open = true }, modifier = Modifier.size(48.dp)) {
+            Icon(AppIcons.MoreVert, contentDescription = stringResource(R.string.more_actions_cd))
+        }
+        DropdownMenu(expanded = open, onDismissRequest = { open = false }) {
+            @Composable
+            fun Item(icon: androidx.compose.ui.graphics.vector.ImageVector, label: Int, action: NowPlayingAction) {
+                DropdownMenuItem(
+                    text = { Text(stringResource(label)) },
+                    leadingIcon = { Icon(icon, contentDescription = null) },
+                    onClick = {
+                        open = false
+                        onAction(action)
+                    },
+                )
+            }
+            Item(AppIcons.Album, R.string.go_to_album, NowPlayingAction.GoToAlbum)
+            Item(AppIcons.Person, R.string.go_to_artist, NowPlayingAction.GoToArtist)
+            Item(AppIcons.VisibilityOff, R.string.hide_song, NowPlayingAction.HideSong)
+            Item(AppIcons.Edit, R.string.edit_tag, NowPlayingAction.EditTags)
+            Item(AppIcons.Lyrics, R.string.edit_lyrics, NowPlayingAction.EditLyrics)
+            Item(AppIcons.Image, R.string.edit_cover, NowPlayingAction.EditCover)
+        }
+    }
 }

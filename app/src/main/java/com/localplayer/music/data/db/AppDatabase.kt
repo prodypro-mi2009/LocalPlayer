@@ -15,8 +15,11 @@ import androidx.sqlite.db.SupportSQLiteDatabase
         HistoryEntity::class,
         PrimaryArtistOverrideEntity::class,
         FavoriteEntity::class,
+        HiddenTrackEntity::class,
+        ExcludedFolderEntity::class,
+        LibraryFolderEntity::class,
     ],
-    version = 5,
+    version = 6,
     exportSchema = true,
 )
 abstract class AppDatabase : RoomDatabase() {
@@ -24,6 +27,8 @@ abstract class AppDatabase : RoomDatabase() {
     abstract fun playlistDao(): PlaylistDao
     abstract fun historyDao(): HistoryDao
     abstract fun favoriteDao(): FavoriteDao
+    abstract fun hiddenDao(): HiddenDao
+    abstract fun folderDao(): FolderDao
 
     companion object {
         /**
@@ -46,6 +51,34 @@ abstract class AppDatabase : RoomDatabase() {
                 )
             }
         }
+
+        /**
+         * 5 -> 6: hidden songs, excluded library folders, folders granted through the system picker,
+         * the folder of every track and folder-linked playlists. Every existing row is kept; folderKey is
+         * filled in by the next scan without re-reading any file.
+         */
+        val MIGRATION_5_6 = object : Migration(5, 6) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                migration5to6Statements.forEach { db.execSQL(it) }
+            }
+        }
+
+        val migration5to6Statements: List<String> = listOf(
+            "ALTER TABLE `tracks` ADD COLUMN `folderKey` TEXT",
+            "ALTER TABLE `playlists` ADD COLUMN `sourceFolderKey` TEXT",
+            "ALTER TABLE `playlists` ADD COLUMN `sourceFolderLabel` TEXT",
+            "ALTER TABLE `playlists` ADD COLUMN `sourceIncludesSubfolders` INTEGER NOT NULL DEFAULT 1",
+            "ALTER TABLE `playlists` ADD COLUMN `folderSyncedAt` INTEGER NOT NULL DEFAULT 0",
+            "ALTER TABLE `playlists` ADD COLUMN `folderSyncAdded` INTEGER NOT NULL DEFAULT 0",
+            "ALTER TABLE `playlists` ADD COLUMN `folderSyncRemoved` INTEGER NOT NULL DEFAULT 0",
+            "ALTER TABLE `playlists` ADD COLUMN `folderSyncStatus` INTEGER NOT NULL DEFAULT 0",
+            "CREATE TABLE IF NOT EXISTS `hidden_tracks` (`trackUri` TEXT NOT NULL, `hiddenAt` INTEGER NOT NULL, " +
+                "`displayName` TEXT, `sizeBytes` INTEGER, PRIMARY KEY(`trackUri`))",
+            "CREATE TABLE IF NOT EXISTS `excluded_folders` (`prefix` TEXT NOT NULL, `excludedAt` INTEGER NOT NULL, " +
+                "PRIMARY KEY(`prefix`))",
+            "CREATE TABLE IF NOT EXISTS `library_folders` (`treeUri` TEXT NOT NULL, `folderKey` TEXT NOT NULL, " +
+                "`label` TEXT NOT NULL, `addedAt` INTEGER NOT NULL, PRIMARY KEY(`treeUri`))",
+        )
 
         /** Exposed so the migration test can show exactly what runs. */
         val migrationStatements: List<String> = listOf(
@@ -82,7 +115,7 @@ abstract class AppDatabase : RoomDatabase() {
 
         fun create(context: Context): AppDatabase =
             Room.databaseBuilder(context, AppDatabase::class.java, "library.db")
-                .addMigrations(MIGRATION_3_4, MIGRATION_4_5)
+                .addMigrations(MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6)
                 // Versions 1-2 (early folder-picker builds) held only a rebuildable index.
                 // Version 3 -> 4 is a real migration; there is no destructive path from 3.
                 .fallbackToDestructiveMigrationFrom(true, 1, 2)

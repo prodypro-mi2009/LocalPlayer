@@ -29,6 +29,9 @@ class MediaStoreFastScanner(
 ) {
     suspend fun scanAll() = coordinator.run { runPass() }
 
+    /** One pass, to be called inside [ScanCoordinator.run]. */
+    suspend fun pass() = runPass()
+
     private suspend fun runPass() {
         coordinator.begin()
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.R) return
@@ -46,7 +49,7 @@ class MediaStoreFastScanner(
         for (row in found) foundUris.add(row.uri)
 
         val deletedIds = existing.values
-            .filter { it.uri !in foundUris || it.mediaType != MediaKind.AUDIO }
+            .filter { FolderKeys.isMediaStoreUri(it.uri) && (it.uri !in foundUris || it.mediaType != MediaKind.AUDIO) }
             .map { it.id }
         for (chunk in deletedIds.chunked(500)) trackDao.deleteByIds(chunk)
         searchIndex.delete(deletedIds)
@@ -60,6 +63,16 @@ class MediaStoreFastScanner(
                 old.sizeBytes != row.sizeBytes ||
                 old.indexVersion == 0
         }
+        // Up-to-date rows that predate folder keys: cheap update.
+        val changedUris = changed.mapTo(HashSet()) { it.uri }
+        val folderFixes = HashMap<String, MutableList<Long>>()
+        for (row in found) {
+            val key = row.folderKey ?: continue
+            val old = existing[row.uri] ?: continue
+            if (old.folderKey != key && row.uri !in changedUris) folderFixes.getOrPut(key) { mutableListOf() }.add(old.id)
+        }
+        for ((key, ids) in folderFixes) for (chunk in ids.chunked(500)) trackDao.setFolderKey(key, chunk)
+
         coordinator.update { it.copy(toProcess = changed.size) }
         if (changed.isEmpty()) return
 
@@ -115,6 +128,7 @@ class MediaStoreFastScanner(
                     albumSort = derived.albumSort,
                     dateAdded = row.dateAdded,
                     indexVersion = TrackIndexing.INDEX_VERSION_FAST,
+                    folderKey = row.folderKey,
                 )
             }
             val newIds = trackDao.upsertAll(entities)
@@ -147,6 +161,7 @@ class MediaStoreFastScanner(
         val trackNumber: Int?,
         val discNumber: Int?,
         val durationMs: Long,
+        val folderKey: String?,
     )
 
     /** Returns null when the query fails (the index is then left alone). */
@@ -170,7 +185,7 @@ class MediaStoreFastScanner(
             MediaStore.Audio.AudioColumns.GENRE,
             MediaStore.MediaColumns.CD_TRACK_NUMBER,
             MediaStore.MediaColumns.DISC_NUMBER,
-        ) + flagColumns.toTypedArray()
+        ) + flagColumns.toTypedArray() + MediaStoreAudio.folderColumns().toTypedArray()
 
         val cursor = (
             try {
@@ -199,6 +214,7 @@ class MediaStoreFastScanner(
             val track = col(MediaStore.MediaColumns.CD_TRACK_NUMBER)
             val disc = col(MediaStore.MediaColumns.DISC_NUMBER)
             val flags = flagColumns.map { col(it) }
+            val folderCols = MediaStoreAudio.folderColumns().map { col(it) }
 
             while (c.moveToNext()) {
                 val displayName = c.getString(name) ?: ""
@@ -221,6 +237,7 @@ class MediaStoreFastScanner(
                         trackNumber = TrackIndexing.parseLeadingInt(c.getString(track)),
                         discNumber = TrackIndexing.parseLeadingInt(c.getString(disc)),
                         durationMs = c.getLong(duration),
+                        folderKey = MediaStoreAudio.folderKey(c, folderCols[0], folderCols.getOrElse(1) { -1 }),
                     ),
                 )
             }

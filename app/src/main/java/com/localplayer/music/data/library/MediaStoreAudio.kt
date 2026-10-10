@@ -1,5 +1,6 @@
 package com.localplayer.music.data.library
 
+import android.database.Cursor
 import android.net.Uri
 import android.os.Build
 import android.provider.MediaStore
@@ -32,5 +33,25 @@ object MediaStoreAudio {
     fun cleanText(value: String?): String? {
         val text = value?.trim()
         return if (text.isNullOrEmpty() || text == MediaStore.UNKNOWN_STRING) null else text
+    }
+
+    /** Columns that tell which folder an item is in: RELATIVE_PATH + VOLUME_NAME (Android 10+), else DATA. */
+    @Suppress("DEPRECATION")
+    fun folderColumns(): List<String> =
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            listOf(MediaStore.MediaColumns.RELATIVE_PATH, MediaStore.MediaColumns.VOLUME_NAME)
+        } else {
+            listOf(MediaStore.MediaColumns.DATA)
+        }
+
+    /** [first] / [second] are the cursor indexes of [folderColumns]. Null when the folder cannot be determined. */
+    fun folderKey(cursor: Cursor, first: Int, second: Int): String? = try {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            FolderKeys.fromRelativePath(cursor.getString(second), cursor.getString(first))
+        } else {
+            FolderKeys.fromDataPath(cursor.getString(first))
+        }
+    } catch (e: Exception) {
+        null
     }
 }

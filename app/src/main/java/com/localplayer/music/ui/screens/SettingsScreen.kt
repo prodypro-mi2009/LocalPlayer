@@ -54,6 +54,8 @@ import com.localplayer.music.ui.components.AppIcons
 import com.localplayer.music.ui.components.DetailTopBar
 import com.localplayer.music.ui.components.SectionHeader
 import com.localplayer.music.ui.nav.NavState
+import com.localplayer.music.ui.nav.Screen
+import androidx.compose.foundation.clickable
 
 @Composable
 fun SettingsScreen(nav: NavState, viewModel: LibraryViewModel) {
@@ -116,6 +118,18 @@ fun SettingsScreen(nav: NavState, viewModel: LibraryViewModel) {
                     modifier = Modifier.padding(top = 4.dp),
                 )
             }
+
+            val hiddenCount by viewModel.hiddenCount.collectAsStateWithLifecycle()
+            NavRow(
+                title = stringResource(R.string.library_folders),
+                subtitle = stringResource(R.string.library_folders_summary),
+                onClick = { nav.push(Screen.LibraryFolders) },
+            )
+            NavRow(
+                title = stringResource(R.string.hidden_songs),
+                subtitle = stringResource(R.string.hidden_songs_count, hiddenCount),
+                onClick = { nav.push(Screen.HiddenSongs) },
+            )
 
             // Scanner choice: OFF = normal scanner, ON = MediaStore-only fast scanner (Android 11+).
             val supported = AppSettings.mediaStoreScannerSupported()
@@ -287,6 +301,20 @@ fun SettingsScreen(nav: NavState, viewModel: LibraryViewModel) {
                 modifier = Modifier.padding(start = 16.dp, end = 16.dp, bottom = 32.dp + LocalBottomBarInset.current),
             )
         }
+    }
+}
+
+@Composable
+private fun NavRow(title: String, subtitle: String, onClick: () -> Unit) {
+    Column(
+        Modifier
+            .fillMaxWidth()
+            .heightIn(min = 56.dp)
+            .clickable(role = Role.Button, onClick = onClick)
+            .padding(horizontal = 16.dp, vertical = 10.dp),
+    ) {
+        Text(title, style = MaterialTheme.typography.bodyLarge)
+        Text(subtitle, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
     }
 }
 

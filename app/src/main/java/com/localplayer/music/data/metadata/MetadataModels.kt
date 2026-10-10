@@ -80,6 +80,15 @@ data class TrackMetadata(
 /** Fields to change. A null value means "remove this field from the file". Absent keys are never touched. */
 typealias MetadataChanges = Map<MetadataField, String?>
 
+/**
+ * A change of the embedded cover picture, written through the same verified pipeline as the text fields.
+ * [Set] replaces ALL embedded pictures with this one (front cover); [Remove] deletes every embedded picture.
+ */
+sealed interface ArtworkChange {
+    class Set(val bytes: ByteArray, val mimeType: String, val width: Int, val height: Int) : ArtworkChange
+    data object Remove : ArtworkChange
+}
+
 /** What can really be written for a given container. */
 data class WriteCapability(
     val container: AudioContainer,

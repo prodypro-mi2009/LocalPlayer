@@ -1,8 +1,27 @@
+import java.util.Properties
+
 plugins {
     id("com.android.application")
     id("org.jetbrains.kotlin.android")
     id("org.jetbrains.kotlin.plugin.compose")
     id("com.google.devtools.ksp")
+}
+
+// --- Release signing -------------------------------------------------------------------------
+// The keystore stays where it is (outside the project). Only its location is written here; the alias and
+// both passwords are read from a local, Git-ignored `keystore.properties` in the project root.
+val releaseKeystoreFile = file("C:/AndroidKeys/myergani-release.jks")
+val keystorePropertiesFile = rootProject.file("keystore.properties")
+val keystoreProperties = Properties().apply {
+    if (keystorePropertiesFile.isFile) keystorePropertiesFile.inputStream().use { load(it) }
+}
+private fun signingValue(name: String): String? = keystoreProperties.getProperty(name)?.trim()?.takeIf { it.isNotEmpty() }
+val releaseSigningProblems: List<String> = buildList {
+    if (!keystorePropertiesFile.isFile) add("keystore.properties was not found in ${rootProject.projectDir}")
+    for (name in listOf("storePassword", "keyAlias", "keyPassword")) {
+        if (signingValue(name) == null) add("'$name' is missing or empty in keystore.properties")
+    }
+    if (!releaseKeystoreFile.isFile) add("the keystore file was not found at ${releaseKeystoreFile.path}")
 }
 
 android {
@@ -13,8 +32,8 @@ android {
         applicationId = "com.localplayer.music"
         minSdk = 26
         targetSdk = 36
-        versionCode = 6
-        versionName = "1.0.0-phase1"
+        versionCode = 8
+        versionName = "1.0.2"
 
         // ARM64 first. There is no native code in this app yet, so this only
         // guarantees that no unneeded architectures are ever packaged.
@@ -25,6 +44,18 @@ android {
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
 
+    signingConfigs {
+        // Only defined when everything is present, so a half-configured setup can never produce a signed APK.
+        if (releaseSigningProblems.isEmpty()) {
+            create("release") {
+                storeFile = releaseKeystoreFile
+                storePassword = signingValue("storePassword")
+                keyAlias = signingValue("keyAlias")
+                keyPassword = signingValue("keyPassword")
+            }
+        }
+    }
+
     buildTypes {
         release {
             isMinifyEnabled = true
@@ -33,9 +64,8 @@ android {
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro",
             )
-            // Personal-use convenience: sign the release build with the debug key so the
-            // APK installs. Replace with a real signingConfig before any distribution.
-            signingConfig = signingConfigs.getByName("debug")
+            // Never the debug key. Without a complete release config the build is stopped (see below).
+            signingConfig = signingConfigs.findByName("release")
         }
     }
 
@@ -107,4 +137,22 @@ dependencies {
     androidTestImplementation("androidx.test:runner:1.6.2")
     androidTestImplementation("androidx.room:room-testing:$room")
     androidTestImplementation("org.jetbrains.kotlinx:kotlinx-coroutines-test:1.10.2")
+}
+
+// Debug builds and plain compilation work without any signing data. Anything that would PACKAGE or INSTALL a
+// release build is refused, with a message that never contains secret values.
+gradle.taskGraph.whenReady {
+    val packagesRelease = allTasks.any {
+        it.project == project &&
+            Regex("^(assemble|bundle|package|install|validateSigning)Release.*").matches(it.name)
+    }
+    if (packagesRelease && releaseSigningProblems.isNotEmpty()) {
+        throw GradleException(
+            "Release signing is not set up:\n" +
+                releaseSigningProblems.joinToString("\n") { " - $it" } +
+                "\nCreate keystore.properties in the project root (it is Git-ignored) with the keys " +
+                "storePassword, keyAlias and keyPassword, using the values of your own keystore " +
+                "(${releaseKeystoreFile.path}). Debug builds are not affected.",
+        )
+    }
 }

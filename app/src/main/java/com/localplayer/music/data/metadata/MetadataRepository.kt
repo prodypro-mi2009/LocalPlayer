@@ -14,6 +14,7 @@ import androidx.core.content.ContextCompat
 import com.localplayer.music.data.db.AppDatabase
 import com.localplayer.music.data.db.SearchIndex
 import com.localplayer.music.data.db.TrackEntity
+import com.localplayer.music.data.library.FolderKeys
 import com.localplayer.music.data.library.TrackIndexing
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -58,6 +59,7 @@ class MetadataRepository(
     private val context: Context,
     private val database: AppDatabase,
     private val searchIndex: SearchIndex,
+    private val onArtworkChanged: (trackId: Long) -> Unit = {},
 ) {
     private val resolver = context.contentResolver
     private val tracks = database.trackDao()
@@ -113,6 +115,13 @@ class MetadataRepository(
             WriteAccess.Denied(FailureKind.FILE_UNAVAILABLE, e.message ?: "The file is not available.")
         } catch (e: SecurityException) {
             when {
+                // A file from a folder granted through the system picker is not a MediaStore item: there is no
+                // consent dialog for it, the folder's own (persisted) write permission is what counts.
+                !FolderKeys.isMediaStoreUri(uri.toString()) ->
+                    WriteAccess.Denied(
+                        FailureKind.WRITE_PERMISSION_DENIED,
+                        "Write access to this folder was not granted. Remove the folder in Library folders and add it again.",
+                    )
                 Build.VERSION.SDK_INT >= Build.VERSION_CODES.R ->
                     WriteAccess.NeedsConsent(MediaStore.createWriteRequest(resolver, listOf(uri)).intentSender)
                 e is RecoverableSecurityException ->
@@ -128,10 +137,14 @@ class MetadataRepository(
      * Writes [changes] into the real file and returns the metadata re-read from that file.
      * Throws [MetadataException] on any failure; the original file is restored when needed.
      */
-    suspend fun save(trackId: Long, changes: MetadataChanges): TrackMetadata = withContext(Dispatchers.IO) {
+    suspend fun save(
+        trackId: Long,
+        changes: MetadataChanges,
+        artwork: ArtworkChange? = null,
+    ): TrackMetadata = withContext(Dispatchers.IO) {
         val entity = tracks.getEntity(trackId)
             ?: throw MetadataException(FailureKind.FILE_UNAVAILABLE, "This track is no longer in the library.")
-        if (changes.isEmpty()) throw MetadataException(FailureKind.INVALID_INPUT, "Nothing to save.")
+        if (changes.isEmpty() && artwork == null) throw MetadataException(FailureKind.INVALID_INPUT, "Nothing to save.")
         for ((field, value) in changes) {
             MetadataValidation.check(field, value)?.let { throw MetadataException(FailureKind.INVALID_INPUT, it) }
         }
@@ -160,9 +173,9 @@ class MetadataRepository(
 
             // 2. edit only the requested fields, then check the working copy before touching the original
             val before = FileTagEngine.read(working, container)
-            FileTagEngine.write(working, container, changes)
+            FileTagEngine.write(working, container, changes, artwork)
             val editedCheck = FileTagEngine.read(working, container)
-            FileTagEngine.verify(before, editedCheck, changes)?.let {
+            FileTagEngine.verify(before, editedCheck, changes, artwork)?.let {
                 throw MetadataException(FailureKind.VERIFICATION_FAILED, it)
             }
             // The audio data itself must be byte-for-byte what it was (only the tag area may differ).
@@ -195,7 +208,7 @@ class MetadataRepository(
                     )
                 }
                 actual = FileTagEngine.read(verifyCopy, container)
-                FileTagEngine.verify(before, actual, changes)?.let {
+                FileTagEngine.verify(before, actual, changes, artwork)?.let {
                     throw MetadataException(FailureKind.VERIFICATION_FAILED, it)
                 }
             } catch (e: Exception) {
@@ -255,6 +268,7 @@ class MetadataRepository(
             albumSort = derived.albumSort,
             indexVersion = TrackIndexing.INDEX_VERSION,
         )
+        onArtworkChanged(updated.id)
         tracks.upsert(updated)
         searchIndex.upsert(
             listOf(
@@ -273,6 +287,19 @@ class MetadataRepository(
 
     /** Modification time (ms) and size MediaStore reports now for the item, or null. */
     private fun currentStamp(uri: Uri): Pair<Long, Long>? = try {
+        if (!FolderKeys.isMediaStoreUri(uri.toString())) {
+            // Document provider item: its own columns (last modified is already in milliseconds).
+            resolver.query(
+                uri,
+                arrayOf(
+                    android.provider.DocumentsContract.Document.COLUMN_LAST_MODIFIED,
+                    android.provider.DocumentsContract.Document.COLUMN_SIZE,
+                ),
+                null,
+                null,
+                null,
+            )?.use { c -> if (c.moveToFirst()) c.getLong(0) to c.getLong(1) else null }
+        } else
         resolver.query(
             uri,
             arrayOf(MediaStore.MediaColumns.DATE_MODIFIED, MediaStore.MediaColumns.SIZE),

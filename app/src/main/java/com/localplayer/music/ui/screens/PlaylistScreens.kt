@@ -76,6 +76,45 @@ private fun PlaylistCover(artwork: List<ArtworkRef>) {
     }
 }
 
+/** Tells the user that the playlist follows a folder, and what the last synchronisation did. */
+@Composable
+private fun FolderLinkBanner(playlist: com.localplayer.music.data.library.PlaylistItem) {
+    val folder = playlist.sourceFolderLabel.orEmpty()
+    Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp)) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Icon(AppIcons.Folder, contentDescription = null, modifier = Modifier.size(20.dp))
+            Spacer(Modifier.width(8.dp))
+            Text(
+                stringResource(R.string.playlist_linked_to_folder, folder),
+                style = MaterialTheme.typography.bodyMedium,
+                modifier = Modifier.weight(1f),
+            )
+        }
+        Text(
+            stringResource(R.string.playlist_linked_note),
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.padding(top = 4.dp),
+        )
+        if (playlist.folderUnavailable) {
+            Text(
+                stringResource(R.string.playlist_folder_unavailable),
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.error,
+                modifier = Modifier.padding(top = 4.dp),
+            )
+        } else if (playlist.folderSyncedAt > 0L) {
+            val whenText = android.text.format.DateUtils.getRelativeTimeSpanString(playlist.folderSyncedAt).toString()
+            Text(
+                stringResource(R.string.playlist_last_sync, playlist.folderSyncAdded, playlist.folderSyncRemoved, whenText),
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.padding(top = 4.dp),
+            )
+        }
+    }
+}
+
 @Composable
 fun PlaylistScreen(screen: Screen.Playlist, nav: NavState, viewModel: LibraryViewModel, menu: SongMenuController) {
     val playlist by viewModel.playlist(screen.id).collectAsStateWithLifecycle(initialValue = null)
@@ -105,6 +144,12 @@ fun PlaylistScreen(screen: Screen.Playlist, nav: NavState, viewModel: LibraryVie
                             text = { Text(stringResource(R.string.rename)) },
                             onClick = { menuOpen = false; renaming = true },
                         )
+                        if (playlist?.isFolderLinked == true) {
+                            DropdownMenuItem(
+                                text = { Text(stringResource(R.string.unlink_from_folder)) },
+                                onClick = { menuOpen = false; viewModel.unlinkPlaylistFromFolder(screen.id) },
+                            )
+                        }
                         DropdownMenuItem(
                             text = { Text(stringResource(R.string.delete)) },
                             onClick = { menuOpen = false; deleting = true },
@@ -126,13 +171,19 @@ fun PlaylistScreen(screen: Screen.Playlist, nav: NavState, viewModel: LibraryVie
                 )
             }
             item(key = "buttons") {
-                OutlinedButton(
-                    onClick = { nav.push(Screen.AddTracks(screen.id)) },
-                    modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp),
-                ) {
-                    Icon(AppIcons.Add, contentDescription = null, modifier = Modifier.size(20.dp))
-                    Spacer(Modifier.width(8.dp))
-                    Text(stringResource(R.string.add_tracks))
+                val linked = playlist
+                if (linked != null && linked.isFolderLinked) {
+                    // A playlist that mirrors a folder is edited by changing the folder (or by unlinking it).
+                    FolderLinkBanner(linked)
+                } else {
+                    OutlinedButton(
+                        onClick = { nav.push(Screen.AddTracks(screen.id)) },
+                        modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp),
+                    ) {
+                        Icon(AppIcons.Add, contentDescription = null, modifier = Modifier.size(20.dp))
+                        Spacer(Modifier.width(8.dp))
+                        Text(stringResource(R.string.add_tracks))
+                    }
                 }
             }
             if (tracks != null && list.isEmpty()) {
@@ -146,7 +197,11 @@ fun PlaylistScreen(screen: Screen.Playlist, nav: NavState, viewModel: LibraryVie
                     onClick = { viewModel.playFrom(list, index) },
                     actions = menu.actionsFor(
                         song,
-                        onRemove = { viewModel.removeFromPlaylist(screen.id, song.uri) },
+                        onRemove = if (playlist?.isFolderLinked == true) {
+                            null
+                        } else {
+                            { viewModel.removeFromPlaylist(screen.id, song.uri) }
+                        },
                         removeLabel = stringResource(R.string.remove_from_playlist, name),
                     ),
                     onMoveUp = if (index > 0) {

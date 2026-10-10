@@ -80,6 +80,19 @@ class SongMenuController(
         }
     }
 
+    /** Hides the song from the library (file untouched) and offers Undo. */
+    fun hideWithUndo(song: TrackListItem) {
+        feedback.scope.launch {
+            viewModel.hideTrack(song.uri)
+            val result = feedback.snackbar.showSnackbar(
+                message = strings(R.string.song_hidden),
+                actionLabel = strings(R.string.undo),
+                duration = SnackbarDuration.Long,
+            )
+            if (result == SnackbarResult.ActionPerformed) viewModel.unhideTrack(song.uri)
+        }
+    }
+
     @Composable
     fun Dialogs() {
         val track = menuTrack
@@ -105,6 +118,7 @@ class SongMenuController(
                     },
                     onEditTag = { nav.push(Screen.EditMetadata(track.id)) },
                     onEditLyrics = { nav.push(Screen.LyricsEditor(track.id)) },
+                    onHide = { hideWithUndo(track) },
                 ),
             )
         }

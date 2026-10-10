@@ -196,6 +196,50 @@ class PlayerConnection(private val context: Context) {
         }
     }
 
+    /**
+     * Removes the queue entry with this occurrence id (so a reorder that happened in the meantime can never make
+     * the wrong row disappear). Same guarantees as [removeQueueItem]: only `removeMediaItem` is called.
+     */
+    suspend fun removeQueueEntry(occurrenceId: String): RemovedItem? = suspendCoroutine { continuation ->
+        withController { c ->
+            val index = (0 until c.mediaItemCount).indexOfFirst { MediaItemFactory.occurrenceId(c.getMediaItemAt(it)) == occurrenceId }
+            if (index < 0) {
+                continuation.resume(null)
+            } else {
+                val item = MediaItemFactory.playable(c.getMediaItemAt(index))
+                c.removeMediaItem(index)
+                continuation.resume(item?.let { RemovedItem(index, it) })
+            }
+        }
+    }
+
+    /**
+     * Moves the entry with this occurrence id to position [to] with ONE `moveMediaItem`. Media3 keeps the current
+     * item playing (no restart, no seek) and adjusts the current index itself, also when the moved entry is the
+     * playing one or passes it.
+     */
+    fun moveQueueEntry(occurrenceId: String, to: Int) = withController { c ->
+        val from = (0 until c.mediaItemCount).indexOfFirst { MediaItemFactory.occurrenceId(c.getMediaItemAt(it)) == occurrenceId }
+        if (from >= 0 && to in 0 until c.mediaItemCount && from != to) c.moveMediaItem(from, to)
+    }
+
+    /**
+     * Removes every queue entry of one track (hiding a song). Highest index first, with `removeMediaItem` only; if
+     * the playing entry is among them Media3 continues with the next entry (or ends when there is none).
+     */
+    suspend fun removeAllOfTrack(trackUri: String): Int = suspendCoroutine { continuation ->
+        withController { c ->
+            var removed = 0
+            for (i in c.mediaItemCount - 1 downTo 0) {
+                if (MediaItemFactory.trackUri(c.getMediaItemAt(i)) == trackUri) {
+                    c.removeMediaItem(i)
+                    removed++
+                }
+            }
+            continuation.resume(removed)
+        }
+    }
+
     /** Puts a removed entry back (pure insert; the current track is not touched). */
     fun reinsert(removed: RemovedItem) = withController {
         it.addMediaItem(removed.index.coerceIn(0, it.mediaItemCount), removed.item)

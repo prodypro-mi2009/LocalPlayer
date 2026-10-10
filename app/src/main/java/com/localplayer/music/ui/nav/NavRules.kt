@@ -11,7 +11,8 @@ package com.localplayer.music.ui.nav
 object NavRules {
     /** Screens that may exist at most once in the stack. Re-opening one goes back to the existing entry. */
     fun isSingleton(screen: Screen): Boolean = when (screen) {
-        Screen.Lyrics, Screen.Queue, Screen.Settings, Screen.Search, Screen.Recent -> true
+        Screen.Lyrics, Screen.Queue, Screen.Settings, Screen.Search, Screen.Recent,
+        Screen.HiddenSongs, Screen.LibraryFolders -> true
         else -> false
     }
 

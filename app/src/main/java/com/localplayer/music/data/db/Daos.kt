@@ -15,8 +15,17 @@ const val TRACK_COLS =
 const val TRACK_COLS_T =
     "t.id, t.uri, t.title, t.artist, t.primaryArtist, t.primaryArtistKey, t.album, t.albumArtist, " +
         "t.albumGroupKey, t.genre, t.year, t.trackNumber, t.discNumber, t.durationMs, t.hasArtwork, t.lastModified"
-const val VISIBLE = "isAvailable = 1 AND isExcluded = 0"
-const val VISIBLE_T = "t.isAvailable = 1 AND t.isExcluded = 0"
+/**
+ * What the library shows: the file is available, it is music, the user did not hide it and it is not in a
+ * folder the user switched off. (excluded_folders.prefix is deliberately not called folderKey, so the column
+ * inside the sub-select can never be confused with tracks.folderKey.)
+ */
+const val VISIBLE = "isAvailable = 1 AND isExcluded = 0 " +
+    "AND uri NOT IN (SELECT trackUri FROM hidden_tracks) " +
+    "AND NOT EXISTS (SELECT 1 FROM excluded_folders e WHERE substr(folderKey, 1, length(e.prefix)) = e.prefix)"
+const val VISIBLE_T = "t.isAvailable = 1 AND t.isExcluded = 0 " +
+    "AND t.uri NOT IN (SELECT trackUri FROM hidden_tracks) " +
+    "AND NOT EXISTS (SELECT 1 FROM excluded_folders e WHERE substr(t.folderKey, 1, length(e.prefix)) = e.prefix)"
 
 /** Lightweight projection used by lists and for building the playback queue. */
 data class TrackListItem(
@@ -49,7 +58,16 @@ data class TrackSyncInfo(
     val sizeBytes: Long,
     val isAvailable: Boolean,
     val indexVersion: Int,
+    val folderKey: String?,
 )
+
+data class FolderFile(val folderKey: String, val displayName: String)
+
+data class FolderRow(val folderKey: String, val trackCount: Int)
+
+data class HiddenOrphanRow(val uri: String, val hiddenAt: Long, val displayName: String?, val sizeBytes: Long?)
+
+data class HiddenCandidateRow(val uri: String, val displayName: String, val sizeBytes: Long)
 
 data class ArtRow(val trackId: Long, val uri: String, val lastModified: Long)
 
@@ -83,12 +101,19 @@ data class PlaylistRow(
     val name: String,
     val trackCount: Int,
     val totalDurationMs: Long,
+    val sourceFolderKey: String? = null,
+    val sourceFolderLabel: String? = null,
+    val sourceIncludesSubfolders: Boolean = true,
+    val folderSyncedAt: Long = 0,
+    val folderSyncAdded: Int = 0,
+    val folderSyncRemoved: Int = 0,
+    val folderSyncStatus: Int = 0,
 )
 
 @Dao
 interface TrackDao {
     // --- lists and search (SQL is built in the repository from fixed fragments, never from user text) ---
-    @RawQuery(observedEntities = [TrackEntity::class])
+    @RawQuery(observedEntities = [TrackEntity::class, HiddenTrackEntity::class, ExcludedFolderEntity::class])
     fun observeTracksRaw(query: SupportSQLiteQuery): Flow<List<TrackListItem>>
 
     @RawQuery
@@ -200,11 +225,15 @@ interface TrackDao {
     )
     fun observeRecentlyPlayed(): Flow<List<TrackListItem>>
 
-    @Query("SELECT COALESCE(MAX(scannedAt), 0) + COUNT(*) FROM tracks")
+    @Query(
+        "SELECT COALESCE(MAX(scannedAt), 0) + COUNT(*) " +
+            "+ (SELECT COALESCE(MAX(hiddenAt), 0) + COUNT(*) FROM hidden_tracks) " +
+            "+ (SELECT COALESCE(MAX(excludedAt), 0) + COUNT(*) FROM excluded_folders) FROM tracks",
+    )
     fun observeStamp(): Flow<Long>
 
     // --- scanner ---
-    @Query("SELECT id, uri, mediaType, lastModified, sizeBytes, isAvailable, indexVersion FROM tracks")
+    @Query("SELECT id, uri, mediaType, lastModified, sizeBytes, isAvailable, indexVersion, folderKey FROM tracks")
     suspend fun getSyncInfo(): List<TrackSyncInfo>
 
     @Query("SELECT DISTINCT albumArtist FROM tracks WHERE albumArtist IS NOT NULL")
@@ -219,6 +248,30 @@ interface TrackDao {
 
     @Upsert
     suspend fun upsert(track: TrackEntity): Long
+
+    @Query("UPDATE tracks SET folderKey = :key WHERE id IN (:ids)")
+    suspend fun setFolderKey(key: String, ids: List<Long>)
+
+    /** (folderKey, displayName) of everything MediaStore lists; used so a picked folder never duplicates it. */
+    @Query("SELECT folderKey, displayName FROM tracks WHERE uri LIKE 'content://media/%' AND folderKey IS NOT NULL")
+    suspend fun mediaStoreFiles(): List<FolderFile>
+
+    @Query("SELECT id FROM tracks WHERE substr(uri, 1, length(:prefix)) = :prefix")
+    suspend fun idsByUriPrefix(prefix: String): List<Long>
+
+    /** Songs (available, any visibility) in a folder, optionally with its subfolders, in file-name order. */
+    @Query(
+        "SELECT uri FROM tracks WHERE isAvailable = 1 AND isExcluded = 0 AND folderKey IS NOT NULL " +
+            "AND (folderKey = :key OR (:recursive = 1 AND substr(folderKey, 1, length(:key)) = :key)) " +
+            "ORDER BY folderKey COLLATE NOCASE, displayName COLLATE NOCASE",
+    )
+    suspend fun urisInFolder(key: String, recursive: Int): List<String>
+
+    @Query(
+        "SELECT folderKey AS folderKey, COUNT(*) AS trackCount FROM tracks WHERE folderKey IS NOT NULL " +
+            "AND isAvailable = 1 AND isExcluded = 0 GROUP BY folderKey",
+    )
+    fun observeFolderRows(): Flow<List<FolderRow>>
 
     @Query("DELETE FROM tracks WHERE id IN (:ids)")
     suspend fun deleteByIds(ids: List<Long>)
@@ -266,22 +319,48 @@ interface PlaylistDao {
     @Query("UPDATE playlist_tracks SET position = :position WHERE playlistId = :playlistId AND trackUri = :uri")
     suspend fun setPosition(playlistId: Long, uri: String, position: Int)
 
+    @Query("SELECT * FROM playlists WHERE id = :id")
+    suspend fun getPlaylist(id: Long): PlaylistEntity?
+
+    @Query("SELECT * FROM playlists WHERE sourceFolderKey IS NOT NULL")
+    suspend fun folderPlaylists(): List<PlaylistEntity>
+
+    @Query(
+        "UPDATE playlists SET sourceFolderKey = :key, sourceFolderLabel = :label, sourceIncludesSubfolders = :recursive " +
+            "WHERE id = :id",
+    )
+    suspend fun linkFolder(id: Long, key: String?, label: String?, recursive: Boolean)
+
+    @Query(
+        "UPDATE playlists SET folderSyncedAt = :at, folderSyncAdded = :added, folderSyncRemoved = :removed, " +
+            "folderSyncStatus = :status WHERE id = :id",
+    )
+    suspend fun setSyncResult(id: Long, at: Long, added: Int, removed: Int, status: Int)
+
     @Query("SELECT trackUri FROM playlist_tracks WHERE playlistId = :playlistId ORDER BY position")
     suspend fun orderedUris(playlistId: Long): List<String>
 
     @Query(
-        "SELECT p.id AS id, p.name AS name, COUNT(t.id) AS trackCount, COALESCE(SUM(t.durationMs), 0) AS totalDurationMs " +
+        "SELECT p.id AS id, p.name AS name, COUNT(t.id) AS trackCount, COALESCE(SUM(t.durationMs), 0) AS totalDurationMs, " +
+            "p.sourceFolderKey AS sourceFolderKey, p.sourceFolderLabel AS sourceFolderLabel, " +
+            "p.sourceIncludesSubfolders AS sourceIncludesSubfolders, p.folderSyncedAt AS folderSyncedAt, " +
+            "p.folderSyncAdded AS folderSyncAdded, p.folderSyncRemoved AS folderSyncRemoved, " +
+            "p.folderSyncStatus AS folderSyncStatus " +
             "FROM playlists p LEFT JOIN playlist_tracks pt ON pt.playlistId = p.id " +
-            "LEFT JOIN tracks t ON t.uri = pt.trackUri AND t.isAvailable = 1 AND t.isExcluded = 0 " +
-            "GROUP BY p.id, p.name ORDER BY p.name COLLATE NOCASE",
+            "LEFT JOIN tracks t ON t.uri = pt.trackUri AND $VISIBLE_T " +
+            "GROUP BY p.id ORDER BY p.name COLLATE NOCASE",
     )
     fun observePlaylists(): Flow<List<PlaylistRow>>
 
     @Query(
-        "SELECT p.id AS id, p.name AS name, COUNT(t.id) AS trackCount, COALESCE(SUM(t.durationMs), 0) AS totalDurationMs " +
+        "SELECT p.id AS id, p.name AS name, COUNT(t.id) AS trackCount, COALESCE(SUM(t.durationMs), 0) AS totalDurationMs, " +
+            "p.sourceFolderKey AS sourceFolderKey, p.sourceFolderLabel AS sourceFolderLabel, " +
+            "p.sourceIncludesSubfolders AS sourceIncludesSubfolders, p.folderSyncedAt AS folderSyncedAt, " +
+            "p.folderSyncAdded AS folderSyncAdded, p.folderSyncRemoved AS folderSyncRemoved, " +
+            "p.folderSyncStatus AS folderSyncStatus " +
             "FROM playlists p LEFT JOIN playlist_tracks pt ON pt.playlistId = p.id " +
-            "LEFT JOIN tracks t ON t.uri = pt.trackUri AND t.isAvailable = 1 AND t.isExcluded = 0 " +
-            "WHERE p.id = :id GROUP BY p.id, p.name",
+            "LEFT JOIN tracks t ON t.uri = pt.trackUri AND $VISIBLE_T " +
+            "WHERE p.id = :id GROUP BY p.id",
     )
     fun observePlaylist(id: Long): Flow<PlaylistRow?>
 
@@ -336,4 +415,70 @@ interface FavoriteDao {
             "WHERE $VISIBLE_T ORDER BY f.addedAt DESC",
     )
     fun observeFavoriteTracks(): Flow<List<TrackListItem>>
+}
+
+@Dao
+interface HiddenDao {
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun hide(entry: HiddenTrackEntity)
+
+    @Query("DELETE FROM hidden_tracks WHERE trackUri = :uri")
+    suspend fun unhide(uri: String)
+
+    @Query("DELETE FROM hidden_tracks")
+    suspend fun unhideAll()
+
+    @Query("DELETE FROM hidden_tracks WHERE trackUri IN (:uris)")
+    suspend fun delete(uris: List<String>)
+
+    @Query("SELECT EXISTS(SELECT 1 FROM hidden_tracks WHERE trackUri = :uri)")
+    suspend fun isHidden(uri: String): Boolean
+
+    @Query(
+        "SELECT $TRACK_COLS_T FROM hidden_tracks h JOIN tracks t ON t.uri = h.trackUri " +
+            "WHERE t.isAvailable = 1 AND t.isExcluded = 0 ORDER BY h.hiddenAt DESC",
+    )
+    fun observeHiddenTracks(): Flow<List<TrackListItem>>
+
+    @Query(
+        "SELECT COUNT(*) FROM hidden_tracks h JOIN tracks t ON t.uri = h.trackUri " +
+            "WHERE t.isAvailable = 1 AND t.isExcluded = 0",
+    )
+    fun observeHiddenCount(): Flow<Int>
+
+    @Query(
+        "SELECT trackUri AS uri, hiddenAt, displayName, sizeBytes FROM hidden_tracks " +
+            "WHERE trackUri NOT IN (SELECT uri FROM tracks)",
+    )
+    suspend fun orphans(): List<HiddenOrphanRow>
+
+    @Query(
+        "SELECT uri, displayName, sizeBytes FROM tracks WHERE isAvailable = 1 " +
+            "AND uri NOT IN (SELECT trackUri FROM hidden_tracks)",
+    )
+    suspend fun candidates(): List<HiddenCandidateRow>
+}
+
+@Dao
+interface FolderDao {
+    @Query("SELECT * FROM library_folders ORDER BY addedAt")
+    fun observeLibraryFolders(): Flow<List<LibraryFolderEntity>>
+
+    @Query("SELECT * FROM library_folders ORDER BY addedAt")
+    suspend fun libraryFolders(): List<LibraryFolderEntity>
+
+    @Upsert
+    suspend fun upsertLibraryFolder(folder: LibraryFolderEntity)
+
+    @Query("DELETE FROM library_folders WHERE treeUri = :treeUri")
+    suspend fun deleteLibraryFolder(treeUri: String)
+
+    @Query("SELECT * FROM excluded_folders")
+    fun observeExcluded(): Flow<List<ExcludedFolderEntity>>
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun exclude(folder: ExcludedFolderEntity)
+
+    @Query("DELETE FROM excluded_folders WHERE prefix = :prefix")
+    suspend fun include(prefix: String)
 }

@@ -21,6 +21,9 @@ import com.localplayer.music.playback.SleepTimer
 import com.localplayer.music.playback.SleepTimerState
 import com.localplayer.music.data.library.AlbumItem
 import com.localplayer.music.data.library.ArtistItem
+import com.localplayer.music.data.library.AddFolderResult
+import com.localplayer.music.data.library.FolderAnalysis
+import com.localplayer.music.data.library.FolderState
 import com.localplayer.music.data.library.GenreItem
 import com.localplayer.music.data.library.PlaylistItem
 import com.localplayer.music.data.library.ScanState
@@ -172,6 +175,8 @@ class LibraryViewModel(private val container: AppContainer) : ViewModel() {
         }
     }
     fun moveQueueItem(from: Int, to: Int) = player.moveQueueItem(from, to)
+    fun moveQueueEntry(occurrenceId: String, to: Int) = player.moveQueueEntry(occurrenceId, to)
+    suspend fun removeQueueEntry(occurrenceId: String) = player.removeQueueEntry(occurrenceId)
     fun clearQueue() = player.clearQueue()
     suspend fun removeQueueItem(index: Int) = player.removeQueueItem(index)
     fun reinsertQueueItem(removed: PlayerConnection.RemovedItem) = player.reinsert(removed)
@@ -197,7 +202,9 @@ class LibraryViewModel(private val container: AppContainer) : ViewModel() {
     fun addToPlaylist(playlist: PlaylistItem, trackUris: List<String>) {
         viewModelScope.launch {
             val result = library.addToPlaylist(playlist.id, trackUris)
-            val message = if (result.added == 0 && result.alreadyThere > 0) {
+            val message = if (result.blockedByFolderLink) {
+                UiMessage(R.string.playlist_is_folder_linked, listOf(playlist.name))
+            } else if (result.added == 0 && result.alreadyThere > 0) {
                 UiMessage(R.string.already_in_playlist, listOf(playlist.name))
             } else {
                 UiMessage(R.string.added_to_playlist, listOf(playlist.name))
@@ -216,11 +223,81 @@ class LibraryViewModel(private val container: AppContainer) : ViewModel() {
     }
 
     fun removeFromPlaylist(playlistId: Long, trackUri: String) {
-        viewModelScope.launch { library.removeFromPlaylist(playlistId, trackUri) }
+        viewModelScope.launch {
+            if (!library.removeFromPlaylist(playlistId, trackUri)) {
+                _messages.tryEmit(UiMessage(R.string.playlist_remove_blocked_folder))
+            }
+        }
     }
 
     fun movePlaylistTrack(playlistId: Long, trackUri: String, targetUri: String) {
         viewModelScope.launch { library.movePlaylistTrack(playlistId, trackUri, targetUri) }
+    }
+
+    // --- hidden songs -----------------------------------------------------------------------
+
+    val hiddenTracks: StateFlow<List<TrackListItem>?> = library.hiddenTracks().asState()
+    val hiddenCount: StateFlow<Int> =
+        library.hiddenCount().stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), 0)
+
+    /** Hides the song from the library and takes it out of the playback queue. The file is not touched. */
+    suspend fun hideTrack(trackUri: String) {
+        library.hideTrack(trackUri)
+        player.removeAllOfTrack(trackUri)
+    }
+
+    fun unhideTrack(trackUri: String) {
+        viewModelScope.launch { library.unhideTrack(trackUri) }
+    }
+
+    fun unhideAll() {
+        viewModelScope.launch { library.unhideAll() }
+    }
+
+    // --- library folders -----------------------------------------------------------------------
+
+    val folderState: StateFlow<FolderState?> = library.folderState().asState()
+
+    fun setFolderExcluded(folderKey: String, excluded: Boolean) {
+        viewModelScope.launch { library.setFolderExcluded(folderKey, excluded) }
+    }
+
+    fun addLibraryFolder(treeUri: Uri) {
+        viewModelScope.launch {
+            val message = when (val result = library.addLibraryFolder(treeUri)) {
+                is AddFolderResult.Added -> UiMessage(R.string.folder_added, listOf(result.label))
+                AddFolderResult.AlreadyAdded -> UiMessage(R.string.folder_already_added)
+                AddFolderResult.Unsupported -> UiMessage(R.string.folder_unsupported)
+                AddFolderResult.NoPermission -> UiMessage(R.string.folder_no_permission)
+            }
+            _messages.tryEmit(message)
+        }
+    }
+
+    fun removeLibraryFolder(treeUri: String) {
+        viewModelScope.launch {
+            library.removeLibraryFolder(treeUri)
+            _messages.tryEmit(UiMessage(R.string.folder_access_removed))
+        }
+    }
+
+    // --- playlist from a folder ------------------------------------------------------------------
+
+    suspend fun analyzeFolder(treeUri: Uri): FolderAnalysis? = library.analyzeFolder(treeUri)
+
+    fun createFolderPlaylist(treeUri: Uri, name: String, analysis: FolderAnalysis) {
+        if (name.isBlank()) return
+        viewModelScope.launch {
+            val id = library.createFolderPlaylist(treeUri, name, analysis)
+            _messages.tryEmit(
+                if (id == null) UiMessage(R.string.folder_no_permission)
+                else UiMessage(R.string.folder_playlist_created, listOf(name.trim())),
+            )
+        }
+    }
+
+    fun unlinkPlaylistFromFolder(id: Long) {
+        viewModelScope.launch { library.unlinkPlaylistFromFolder(id) }
     }
 
     // --- history / classification ----------------------------------------------------------
@@ -275,6 +352,8 @@ class LibraryViewModel(private val container: AppContainer) : ViewModel() {
     } catch (e: MetadataException) {
         LyricsLoad.Failed
     }
+
+    suspend fun trackItem(trackId: Long): TrackListItem? = library.trackItem(trackId)
 
     fun playTrack(trackId: Long) {
         viewModelScope.launch {

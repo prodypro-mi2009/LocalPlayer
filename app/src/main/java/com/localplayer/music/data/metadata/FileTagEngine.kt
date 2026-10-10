@@ -10,6 +10,8 @@ import org.jaudiotagger.tag.FieldKey
 import org.jaudiotagger.tag.Tag
 import org.jaudiotagger.tag.TagException
 import org.jaudiotagger.tag.TagOptionSingleton
+import org.jaudiotagger.tag.images.ArtworkFactory
+import org.jaudiotagger.tag.reference.PictureTypes
 import java.io.File
 import java.io.IOException
 import java.util.logging.Level
@@ -84,7 +86,7 @@ object FileTagEngine {
      * Minimal update: only the fields in [changes] are touched, everything else in the tag
      * (artwork, lyrics, unknown frames, other fields) is kept as it was read.
      */
-    fun write(file: File, container: AudioContainer, changes: MetadataChanges) {
+    fun write(file: File, container: AudioContainer, changes: MetadataChanges, artwork: ArtworkChange? = null) {
         check(configured) { "FileTagEngine.configure() must be called first" }
         if (!container.tagWritable) {
             throw MetadataException(
@@ -96,6 +98,7 @@ object FileTagEngine {
         val tag = audioFile.tagOrCreateAndSetDefault
         try {
             for ((field, value) in changes) applyChange(tag, field, value)
+            if (artwork != null) applyArtwork(tag, artwork)
             audioFile.commit()
         } catch (e: MetadataException) {
             throw e
@@ -114,7 +117,12 @@ object FileTagEngine {
      * Compares the file as re-read after writing with the file before writing.
      * Returns null when everything is as expected, otherwise a human-readable reason.
      */
-    fun verify(before: TrackMetadata, after: TrackMetadata, changes: MetadataChanges): String? {
+    fun verify(
+        before: TrackMetadata,
+        after: TrackMetadata,
+        changes: MetadataChanges,
+        artwork: ArtworkChange? = null,
+    ): String? {
         for (field in MetadataField.entries) {
             val actual = after.value(field)
             if (changes.containsKey(field)) {
@@ -126,11 +134,26 @@ object FileTagEngine {
                 return "${field.name} changed unexpectedly (${quote(before.value(field))} -> ${quote(actual)})"
             }
         }
-        if (after.artworkCount != before.artworkCount) {
-            return "Artwork count changed (${before.artworkCount} -> ${after.artworkCount})"
-        }
-        if (after.artworkFingerprints != before.artworkFingerprints) {
-            return "Embedded artwork is not byte-for-byte identical after the write"
+        when (artwork) {
+            null -> {
+                if (after.artworkCount != before.artworkCount) {
+                    return "Artwork count changed (${before.artworkCount} -> ${after.artworkCount})"
+                }
+                if (after.artworkFingerprints != before.artworkFingerprints) {
+                    return "Embedded artwork is not byte-for-byte identical after the write"
+                }
+            }
+            ArtworkChange.Remove -> {
+                if (after.artworkCount != 0) return "The cover is still in the file (${after.artworkCount} picture(s))"
+            }
+            is ArtworkChange.Set -> {
+                if (after.artworkCount != 1) return "Expected exactly one embedded cover but found ${after.artworkCount}"
+                val expected = sha256Hex(artwork.bytes)
+                // Fingerprint format: "mime:pictureType:sha256".
+                if (after.artworkFingerprints.singleOrNull()?.substringAfterLast(':') != expected) {
+                    return "The embedded cover is not byte-for-byte what was written"
+                }
+            }
         }
         if (kotlin.math.abs(after.durationMs - before.durationMs) > 150) {
             return "Audio duration changed (${before.durationMs} ms -> ${after.durationMs} ms)"
@@ -193,6 +216,30 @@ object FileTagEngine {
             throw unsupportedField(field, e)
         }
     }
+
+    private fun applyArtwork(tag: Tag, change: ArtworkChange) {
+        try {
+            // Always remove first: a file can hold several pictures and the old front cover must not stay behind.
+            tag.deleteArtworkField()
+            if (change is ArtworkChange.Set) {
+                val artwork = ArtworkFactory.getNew()
+                artwork.binaryData = change.bytes
+                artwork.mimeType = change.mimeType
+                artwork.description = ""
+                artwork.pictureType = PictureTypes.DEFAULT_ID // 3 = front cover
+                artwork.width = change.width
+                artwork.height = change.height
+                tag.setField(artwork)
+            }
+        } catch (e: RuntimeException) {
+            throw MetadataException(FailureKind.UNSUPPORTED_FIELD, "The cover cannot be written for this file format.", e)
+        } catch (e: TagException) {
+            throw MetadataException(FailureKind.UNSUPPORTED_FIELD, "The cover cannot be written for this file format.", e)
+        }
+    }
+
+    private fun sha256Hex(bytes: ByteArray): String =
+        java.security.MessageDigest.getInstance("SHA-256").digest(bytes).joinToString("") { "%02x".format(it) }
 
     private fun fieldKey(field: MetadataField): FieldKey = when (field) {
         MetadataField.TITLE -> FieldKey.TITLE

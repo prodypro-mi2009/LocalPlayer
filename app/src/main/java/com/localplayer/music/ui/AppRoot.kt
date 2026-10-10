@@ -87,12 +87,16 @@ import com.localplayer.music.ui.nav.NavState
 import com.localplayer.music.ui.nav.Screen
 import com.localplayer.music.ui.nav.encode
 import com.localplayer.music.ui.player.MiniPlayer
+import com.localplayer.music.ui.player.NowPlayingAction
 import com.localplayer.music.ui.player.NowPlayingScreen
 import com.localplayer.music.ui.theme.rememberArtworkTone
 import com.localplayer.music.ui.screens.AddTracksScreen
 import com.localplayer.music.ui.screens.AlbumScreen
 import com.localplayer.music.ui.screens.ArtistScreen
+import com.localplayer.music.ui.screens.EditCoverScreen
 import com.localplayer.music.ui.screens.EditMetadataScreen
+import com.localplayer.music.ui.screens.HiddenSongsScreen
+import com.localplayer.music.ui.screens.LibraryFoldersScreen
 import com.localplayer.music.ui.screens.GenreScreen
 import com.localplayer.music.ui.screens.HomeScreen
 import com.localplayer.music.ui.screens.LyricsEditorScreen
@@ -306,6 +310,9 @@ private fun LibraryRoot(viewModel: LibraryViewModel) {
                         is Screen.Playlist -> PlaylistScreen(screen, nav, viewModel, menu)
                         is Screen.AddTracks -> AddTracksScreen(screen, nav, viewModel)
                         is Screen.EditMetadata -> EditMetadataScreen(screen.trackId, nav, container)
+                        is Screen.EditCover -> EditCoverScreen(screen.trackId, nav, container)
+                        Screen.HiddenSongs -> HiddenSongsScreen(nav, viewModel)
+                        Screen.LibraryFolders -> LibraryFoldersScreen(nav, viewModel)
                     }
                 }
             }
@@ -424,6 +431,47 @@ private fun LibraryRoot(viewModel: LibraryViewModel) {
             onOpenLyrics = {
                 showPlayer = false
                 nav.push(Screen.Lyrics)
+            },
+            onMenuAction = { action, now ->
+                feedback.scope.launch {
+                    val track = now.mediaId.toLongOrNull()?.let { viewModel.trackItem(it) }
+                    if (track == null) {
+                        feedback.snackbar.showSnackbar(context.getString(R.string.song_not_in_library))
+                        return@launch
+                    }
+                    when (action) {
+                        NowPlayingAction.GoToAlbum -> {
+                            val key = track.albumGroupKey
+                            if (key == null) {
+                                feedback.snackbar.showSnackbar(context.getString(R.string.no_album_for_song))
+                            } else {
+                                showPlayer = false
+                                nav.push(Screen.Album(key, track.album.orEmpty()))
+                            }
+                        }
+                        NowPlayingAction.GoToArtist -> {
+                            showPlayer = false
+                            nav.push(Screen.Artist(track.primaryArtistKey.orEmpty(), track.primaryArtist.orEmpty()))
+                        }
+                        NowPlayingAction.EditTags -> {
+                            showPlayer = false
+                            nav.push(Screen.EditMetadata(track.id))
+                        }
+                        NowPlayingAction.EditLyrics -> {
+                            showPlayer = false
+                            nav.push(Screen.LyricsEditor(track.id))
+                        }
+                        NowPlayingAction.EditCover -> {
+                            showPlayer = false
+                            nav.push(Screen.EditCover(track.id))
+                        }
+                        NowPlayingAction.HideSong -> {
+                            // The player is closed so the confirmation (with Undo) is visible; playback continues.
+                            showPlayer = false
+                            menu.hideWithUndo(track)
+                        }
+                    }
+                }
             },
         )
     }

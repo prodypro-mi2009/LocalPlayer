@@ -50,7 +50,9 @@ fun QueueScreen(nav: NavState, viewModel: LibraryViewModel, feedback: UiFeedback
             viewModel = viewModel,
             onRemove = { entry ->
                 feedback.scope.launch {
-                    val removed = viewModel.removeQueueItem(entry.index)
+                    // By occurrence id, so a re-order that happened meanwhile can never remove the wrong row.
+                    val removed = entry.occurrenceId?.let { viewModel.removeQueueEntry(it) }
+                        ?: viewModel.removeQueueItem(entry.index)
                     if (removed != null) {
                         val result = feedback.snackbar.showSnackbar(
                             message = removedText,
