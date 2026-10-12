@@ -1,5 +1,7 @@
 package com.localplayer.music.ui.player
 
+import com.localplayer.music.ui.theme.artistFont
+import com.localplayer.music.ui.theme.songTitleFont
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -229,14 +231,14 @@ fun QueueList(
                 Column(modifier = Modifier.weight(1f)) {
                     Text(
                         text = entry.title,
-                        style = MaterialTheme.typography.bodyLarge,
+                        style = MaterialTheme.typography.bodyLarge.songTitleFont(),
                         color = if (isCurrent) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface,
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis,
                     )
                     Text(
                         text = entry.artist,
-                        style = MaterialTheme.typography.bodySmall,
+                        style = MaterialTheme.typography.bodySmall.artistFont(),
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis,

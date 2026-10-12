@@ -119,6 +119,19 @@ interface TrackDao {
     @RawQuery
     suspend fun queryTracksRaw(query: SupportSQLiteQuery): List<TrackListItem>
 
+    /** Everything Your Mix may choose from: the songs the library shows (not hidden, available, not switched off). */
+    @Query(
+        "SELECT id, uri, title, primaryArtistKey AS artistKey, albumGroupKey AS albumKey, genreKey, durationMs, " +
+            "dateAdded FROM tracks WHERE $VISIBLE",
+    )
+    suspend fun mixCandidates(): List<com.localplayer.music.data.mix.MixCandidate>
+
+    @Query("SELECT $TRACK_COLS FROM tracks WHERE $VISIBLE AND uri IN (:uris)")
+    suspend fun itemsByUris(uris: List<String>): List<TrackListItem>
+
+    @Query("SELECT uri FROM tracks WHERE $VISIBLE")
+    suspend fun visibleUris(): List<String>
+
     @RawQuery
     suspend fun queryArtistsRaw(query: SupportSQLiteQuery): List<ArtistRow>
 
@@ -481,4 +494,56 @@ interface FolderDao {
 
     @Query("DELETE FROM excluded_folders WHERE prefix = :prefix")
     suspend fun include(prefix: String)
+}
+
+/** One Top-N row: the song (with everything lists need) and its numbers for the period. */
+data class TopTrackRow(
+    @androidx.room.Embedded val track: TrackListItem,
+    val plays: Int,
+    val listenedMs: Long,
+)
+
+data class UriCount(val trackUri: String, val plays: Int)
+
+data class UriStats(val trackUri: String, val totalPlays: Int, val lastAt: Long?)
+
+@Dao
+interface ListeningDao {
+    @Query(
+        "UPDATE listening_days SET listenedMs = listenedMs + :ms, plays = plays + :plays, lastListenedAt = :now " +
+            "WHERE day = :day AND trackUri = :uri",
+    )
+    suspend fun addTo(day: Int, uri: String, ms: Long, plays: Int, now: Long): Int
+
+    @Insert(onConflict = OnConflictStrategy.IGNORE)
+    suspend fun insert(row: ListeningDayEntity): Long
+
+    @Query("SELECT COALESCE(SUM(listenedMs), 0) FROM listening_days WHERE day BETWEEN :from AND :to")
+    fun observeListenedMs(from: Int, to: Int): Flow<Long>
+
+    @Query("SELECT COALESCE(SUM(plays), 0) FROM listening_days WHERE day BETWEEN :from AND :to")
+    fun observePlays(from: Int, to: Int): Flow<Int>
+
+    /** The 20 most played visible songs of the period; ties are broken by listening time, then by title. */
+    @Query(
+        "SELECT $TRACK_COLS_T, s.plays AS plays, s.ms AS listenedMs FROM " +
+            "(SELECT trackUri, SUM(plays) AS plays, SUM(listenedMs) AS ms FROM listening_days " +
+            "WHERE day BETWEEN :from AND :to GROUP BY trackUri HAVING SUM(plays) > 0) s " +
+            "JOIN tracks t ON t.uri = s.trackUri WHERE $VISIBLE_T " +
+            "ORDER BY s.plays DESC, s.ms DESC, t.titleSort LIMIT 20",
+    )
+    fun observeTop20(from: Int, to: Int): Flow<List<TopTrackRow>>
+
+    @Query("SELECT COALESCE(SUM(plays), 0) FROM listening_days")
+    suspend fun totalPlays(): Int
+
+    @Query("SELECT trackUri, SUM(plays) AS plays FROM listening_days WHERE day >= :fromDay GROUP BY trackUri")
+    suspend fun playsSince(fromDay: Int): List<UriCount>
+
+    @Query("SELECT trackUri, SUM(plays) AS totalPlays, MAX(lastListenedAt) AS lastAt FROM listening_days GROUP BY trackUri")
+    suspend fun totals(): List<UriStats>
+
+    /** Play history from before the statistics existed (version 6 and older), used for "last heard". */
+    @Query("SELECT trackUri, 0 AS totalPlays, MAX(playedAt) AS lastAt FROM listening_history GROUP BY trackUri")
+    suspend fun legacyLastPlayed(): List<UriStats>
 }

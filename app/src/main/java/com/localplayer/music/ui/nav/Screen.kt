@@ -24,6 +24,23 @@ sealed interface Screen {
     data object HiddenSongs : Screen
     /** Library folders: granted folders, folders switched off, rescan. */
     data object LibraryFolders : Screen
+    /** Appearance > Colors (dynamic colors, background, button colors). */
+    data object Colors : Screen
+    /** Appearance > Fonts (one font per text category). */
+    data object Fonts : Screen
+    /** The sub-screens of the Settings menu (one card each). */
+    data object SettingsAppearance : Screen
+    data object SettingsLanguage : Screen
+    data object SettingsLibrary : Screen
+    data object SettingsLyrics : Screen
+    data object SettingsYourMix : Screen
+    data object SettingsAbout : Screen
+    /** Your Mix: the generated list. */
+    data object YourMix : Screen
+    /** Listening time per period (today, week, month, year, previous month). */
+    data object TimeUsage : Screen
+    /** The 20 most played songs of a period. */
+    data object Top20 : Screen
 }
 
 private const val SEP = "\u0001"
@@ -46,6 +63,17 @@ fun Screen.encode(): String = when (this) {
     is Screen.EditCover -> listOf("editcover", trackId.toString()).joinToString(SEP)
     Screen.HiddenSongs -> "hidden"
     Screen.LibraryFolders -> "folders"
+    Screen.Colors -> "colors"
+    Screen.Fonts -> "fonts"
+    Screen.SettingsAppearance -> "set-appearance"
+    Screen.SettingsLanguage -> "set-language"
+    Screen.SettingsLibrary -> "set-library"
+    Screen.SettingsLyrics -> "set-lyrics"
+    Screen.SettingsYourMix -> "set-yourmix"
+    Screen.SettingsAbout -> "set-about"
+    Screen.YourMix -> "yourmix"
+    Screen.TimeUsage -> "timeusage"
+    Screen.Top20 -> "top20"
 }
 
 fun decodeScreen(text: String): Screen {
@@ -68,6 +96,17 @@ fun decodeScreen(text: String): Screen {
             "editcover" -> Screen.EditCover(parts[1].toLong())
             "hidden" -> Screen.HiddenSongs
             "folders" -> Screen.LibraryFolders
+            "colors" -> Screen.Colors
+            "fonts" -> Screen.Fonts
+            "set-appearance" -> Screen.SettingsAppearance
+            "set-language" -> Screen.SettingsLanguage
+            "set-library" -> Screen.SettingsLibrary
+            "set-lyrics" -> Screen.SettingsLyrics
+            "set-yourmix" -> Screen.SettingsYourMix
+            "set-about" -> Screen.SettingsAbout
+            "yourmix" -> Screen.YourMix
+            "timeusage" -> Screen.TimeUsage
+            "top20" -> Screen.Top20
             else -> Screen.Home
         }
     } catch (e: Exception) {

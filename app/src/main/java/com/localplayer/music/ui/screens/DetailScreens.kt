@@ -20,6 +20,7 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -73,7 +74,7 @@ fun PlayShuffleRow(onPlay: () -> Unit, onShuffle: () -> Unit, modifier: Modifier
 
 /** Shared layout of every "list of tracks" detail screen. */
 @Composable
-private fun TrackListDetail(
+internal fun TrackListDetail(
     title: String,
     nav: NavState,
     viewModel: LibraryViewModel,
@@ -261,6 +262,11 @@ fun RecentScreen(nav: NavState, viewModel: LibraryViewModel, menu: SongMenuContr
         menu = menu,
         tracks = tracks,
         emptyText = stringResource(R.string.empty_history),
+        header = {
+            TextButton(onClick = { nav.push(Screen.TimeUsage) }, modifier = Modifier.padding(horizontal = 8.dp)) {
+                Text(stringResource(R.string.stats_open_from_history))
+            }
+        },
         topBarActions = {
             IconButton(onClick = { confirmClear = true }, enabled = !tracks.isNullOrEmpty()) {
                 Icon(AppIcons.Close, contentDescription = stringResource(R.string.clear_history))

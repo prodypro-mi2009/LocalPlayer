@@ -10,6 +10,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -54,9 +55,16 @@ class MainActivity : ComponentActivity() {
             val settings = container.settings
             val themeMode by settings.themeMode.collectAsStateWithLifecycle()
             val dynamicColor by settings.dynamicColor.collectAsStateWithLifecycle()
+            val pureMode by settings.pureMode.collectAsStateWithLifecycle()
             // Window bars follow the APP theme (transparent bars, matching icon colour and window background).
-            ConfigureSystemBars(this@MainActivity, themeMode.isDark(isSystemInDarkTheme()))
-            LocalPlayerTheme(themeMode = themeMode, dynamicColor = dynamicColor) {
+            ConfigureSystemBars(this@MainActivity, pureMode.forcedDark ?: themeMode.isDark(isSystemInDarkTheme()))
+            val controlColors by settings.controlColors.collectAsStateWithLifecycle()
+            val fontChoices by settings.fontChoices.collectAsStateWithLifecycle()
+            val customFontVersion by settings.customFontVersion.collectAsStateWithLifecycle()
+            val fonts = remember(fontChoices, customFontVersion) {
+                com.localplayer.music.ui.theme.AppFonts.resolve(fontChoices, container.customFont.file)
+            }
+            LocalPlayerTheme(themeMode = themeMode, dynamicColor = dynamicColor, controlColors = controlColors, fonts = fonts, pureMode = pureMode) {
                 Surface(
                     modifier = Modifier.fillMaxSize(),
                     color = MaterialTheme.colorScheme.background,

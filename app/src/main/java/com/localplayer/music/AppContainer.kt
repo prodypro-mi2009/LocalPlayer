@@ -55,5 +55,14 @@ class AppContainer(val appContext: Context) {
     val metadata: MetadataRepository by lazy { MetadataRepository(appContext, database, searchIndex) { artwork.invalidate(it) } }
     val audioSpecs: AudioSpecReader by lazy { AudioSpecReader(appContext) }
     val background: BackgroundRepository by lazy { BackgroundRepository(appContext, settings) }
+    val customFont: com.localplayer.music.data.artwork.CustomFontRepository by lazy {
+        com.localplayer.music.data.artwork.CustomFontRepository(appContext, settings)
+    }
+    val stats: com.localplayer.music.data.stats.StatsRepository by lazy {
+        com.localplayer.music.data.stats.StatsRepository(database)
+    }
+    val mix: com.localplayer.music.data.mix.MixRepository by lazy {
+        com.localplayer.music.data.mix.MixRepository(database, settings)
+    }
     val playerConnection: PlayerConnection by lazy { PlayerConnection(appContext) }
 }

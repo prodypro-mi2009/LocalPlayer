@@ -47,6 +47,7 @@ import com.localplayer.music.data.lyrics.LyricLine
 import com.localplayer.music.data.lyrics.LyricsSync
 import com.localplayer.music.playback.ArtworkRef
 import com.localplayer.music.ui.LibraryViewModel
+import com.localplayer.music.ui.theme.lyricsFont
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
@@ -84,6 +85,7 @@ fun SyncedLyricsList(
     onUserScroll: () -> Unit,
     onSeek: (Long) -> Unit,
     modifier: Modifier = Modifier,
+    textAlign: TextAlign = TextAlign.Start,
 ) {
     val listState = rememberLazyListState()
     var programmatic by remember { mutableStateOf(false) }
@@ -114,9 +116,9 @@ fun SyncedLyricsList(
             val alpha by animateFloatAsState(if (active) 1f else 0.45f, label = "lyric-alpha")
             Text(
                 text = line.text.ifEmpty { "♪" },
-                style = if (active) MaterialTheme.typography.headlineSmall else MaterialTheme.typography.titleLarge,
+                style = (if (active) MaterialTheme.typography.headlineSmall else MaterialTheme.typography.titleLarge).lyricsFont(),
                 fontWeight = if (active) FontWeight.Bold else FontWeight.Normal,
-                textAlign = TextAlign.Start,
+                textAlign = textAlign,
                 modifier = Modifier
                     .fillMaxWidth()
                     .alpha(alpha)
@@ -128,10 +130,11 @@ fun SyncedLyricsList(
 }
 
 @Composable
-fun PlainLyrics(text: String, modifier: Modifier = Modifier) {
+fun PlainLyrics(text: String, modifier: Modifier = Modifier, textAlign: TextAlign = TextAlign.Start) {
     Text(
         text = text,
-        style = MaterialTheme.typography.titleMedium,
+        style = MaterialTheme.typography.titleMedium.lyricsFont(),
+        textAlign = textAlign,
         modifier = modifier.fillMaxSize().verticalScroll(rememberScrollState())
             .padding(start = 24.dp, top = 24.dp, end = 24.dp, bottom = 24.dp + LocalBottomBarInset.current),
     )
@@ -184,6 +187,6 @@ fun FollowButtonHint(visible: Boolean, onClick: () -> Unit) {
         Modifier.fillMaxSize().padding(start = 24.dp, top = 24.dp, end = 24.dp, bottom = 24.dp + LocalBottomBarInset.current),
         contentAlignment = Alignment.BottomCenter,
     ) {
-        androidx.compose.material3.FilledTonalButton(onClick = onClick) { Text(stringResource(R.string.lyrics_follow)) }
+        androidx.compose.material3.FilledTonalButton(onClick = onClick, colors = com.localplayer.music.ui.theme.tonalButtonColors()) { Text(stringResource(R.string.lyrics_follow)) }
     }
 }

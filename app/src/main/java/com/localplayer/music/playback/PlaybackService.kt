@@ -34,6 +34,7 @@ class PlaybackService : MediaSessionService() {
 
     private var mediaSession: MediaSession? = null
     private var historyRecorder: HistoryRecorder? = null
+    private var listeningRecorder: ListeningRecorder? = null
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
 
     override fun onCreate() {
@@ -64,6 +65,7 @@ class PlaybackService : MediaSessionService() {
         })
 
         historyRecorder = HistoryRecorder(player, container.database.historyDao(), scope)
+        listeningRecorder = ListeningRecorder(player, container.stats)
         SleepTimer.attach(player) { stopSelf() }
 
         val sessionActivity = PendingIntent.getActivity(
@@ -126,6 +128,8 @@ class PlaybackService : MediaSessionService() {
         SleepTimer.detach()
         historyRecorder?.release()
         historyRecorder = null
+        listeningRecorder?.release()
+        listeningRecorder = null
         mediaSession?.run {
             player.release()
             release()

@@ -175,6 +175,7 @@ fun SearchScreen(nav: NavState, viewModel: LibraryViewModel, menu: SongMenuContr
                                 title = artist.name ?: unknownArtist,
                                 subtitle = songCountText(artist.trackCount),
                                 onClick = { nav.push(Screen.Artist(artist.key, artist.name.orEmpty())) },
+                                isArtist = true,
                             )
                         }
                     }

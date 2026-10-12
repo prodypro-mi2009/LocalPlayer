@@ -181,3 +181,22 @@ data class LibraryFolderEntity(
     val label: String,
     val addedAt: Long,
 )
+
+/**
+ * App data (database version 7): real listening, summed per LOCAL calendar day and song. [day] is yyyymmdd on the
+ * device's calendar at the time of listening; [listenedMs] is real playback time; [plays] counts plays that met the
+ * play criterion (ListeningMeter / PlayCriterion). Referenced by the stable track URI like favourites, so it
+ * survives re-indexing and tag edits and is never deleted when a song is hidden.
+ */
+@Entity(
+    tableName = "listening_days",
+    primaryKeys = ["day", "trackUri"],
+    indices = [Index(value = ["trackUri"])],
+)
+data class ListeningDayEntity(
+    val day: Int,
+    val trackUri: String,
+    val listenedMs: Long,
+    val plays: Int,
+    val lastListenedAt: Long,
+)

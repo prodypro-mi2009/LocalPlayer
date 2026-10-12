@@ -12,7 +12,9 @@ object NavRules {
     /** Screens that may exist at most once in the stack. Re-opening one goes back to the existing entry. */
     fun isSingleton(screen: Screen): Boolean = when (screen) {
         Screen.Lyrics, Screen.Queue, Screen.Settings, Screen.Search, Screen.Recent,
-        Screen.HiddenSongs, Screen.LibraryFolders -> true
+        Screen.HiddenSongs, Screen.LibraryFolders, Screen.Colors, Screen.Fonts,
+        Screen.SettingsAppearance, Screen.SettingsLanguage, Screen.SettingsLibrary, Screen.SettingsLyrics,
+        Screen.SettingsYourMix, Screen.SettingsAbout, Screen.YourMix, Screen.TimeUsage, Screen.Top20 -> true
         else -> false
     }
 

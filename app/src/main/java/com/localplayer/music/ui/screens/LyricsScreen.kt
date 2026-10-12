@@ -36,6 +36,8 @@ import com.localplayer.music.ui.components.rememberBlurredArtwork
 import com.localplayer.music.ui.nav.NavState
 import com.localplayer.music.ui.theme.ArtworkGradient
 import com.localplayer.music.ui.theme.ForceStatusBarIcons
+import com.localplayer.music.ui.theme.LocalPureMode
+import com.localplayer.music.ui.theme.fallbackTint
 import com.localplayer.music.ui.theme.lyricsVerticalBrush
 
 /**
@@ -54,17 +56,21 @@ fun LyricsScreen(nav: NavState, viewModel: LibraryViewModel, tone: Color?) {
     val now = state.nowPlaying
     val blurred = rememberBlurredArtwork(now?.artwork)
     val tint by animateColorAsState(
-        targetValue = tone ?: MaterialTheme.colorScheme.primaryContainer,
+        targetValue = tone ?: fallbackTint(),
         animationSpec = tween(durationMillis = 500),
         label = "lyricsTint",
     )
-    ForceStatusBarIcons(lightIcons = true)
+    val pure = LocalPureMode.current.isOn
+    // Pure black / white: the page is the plain theme background with theme text (no artwork, no tint, no scrim).
+    if (!pure) ForceStatusBarIcons(lightIcons = true)
 
-    Box(Modifier.fillMaxSize().background(Color.Black)) {
-        BlurredBackdrop(blurred)
-        Box(Modifier.fillMaxSize().background(lyricsVerticalBrush(tint)))
-        Box(Modifier.fillMaxSize().background(Color.Black.copy(alpha = ArtworkGradient.LYRICS_SCRIM)))
-        CompositionLocalProvider(LocalContentColor provides Color.White) {
+    Box(Modifier.fillMaxSize().background(if (pure) MaterialTheme.colorScheme.background else Color.Black)) {
+        if (!pure) {
+            BlurredBackdrop(blurred)
+            Box(Modifier.fillMaxSize().background(lyricsVerticalBrush(tint)))
+            Box(Modifier.fillMaxSize().background(Color.Black.copy(alpha = ArtworkGradient.LYRICS_SCRIM)))
+        }
+        CompositionLocalProvider(LocalContentColor provides (if (pure) MaterialTheme.colorScheme.onBackground else Color.White)) {
             Column(Modifier.fillMaxSize()) {
                 DetailTopBar(title = now?.title ?: stringResource(R.string.lyrics), onBack = { nav.pop() })
                 if (now == null) {
@@ -80,6 +86,8 @@ fun LyricsScreen(nav: NavState, viewModel: LibraryViewModel, tone: Color?) {
 
 @Composable
 private fun LyricsBody(viewModel: LibraryViewModel, trackId: Long?, isPlaying: Boolean) {
+    val alignment by viewModel.settings.lyricsAlignment.collectAsStateWithLifecycle()
+    val textAlign = alignment.toTextAlign()
     val load by produceState<LyricsLoad?>(initialValue = null, trackId) {
         value = trackId?.let { viewModel.loadLyrics(it) } ?: LyricsLoad.None
     }
@@ -90,7 +98,7 @@ private fun LyricsBody(viewModel: LibraryViewModel, trackId: Long?, isPlaying: B
         is LyricsLoad.Loaded -> {
             val lyrics = result.lyrics
             if (!lyrics.isSynced) {
-                PlainLyrics(lyrics.plainText)
+                PlainLyrics(lyrics.plainText, textAlign = textAlign)
             } else {
                 var follow by remember { mutableStateOf(true) }
                 val active = rememberActiveLyricIndex(viewModel, lyrics.lines, isPlaying)
@@ -99,6 +107,7 @@ private fun LyricsBody(viewModel: LibraryViewModel, trackId: Long?, isPlaying: B
                         lines = lyrics.lines,
                         activeIndex = active,
                         follow = follow,
+                        textAlign = textAlign,
                         onUserScroll = { follow = false },
                         onSeek = {
                             viewModel.seekTo(it)

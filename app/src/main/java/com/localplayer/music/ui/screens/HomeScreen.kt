@@ -1,5 +1,9 @@
 package com.localplayer.music.ui.screens
 
+import com.localplayer.music.ui.components.SectionHeader
+import com.localplayer.music.ui.theme.artistFont
+import com.localplayer.music.ui.theme.albumGenreFont
+import com.localplayer.music.ui.theme.headingFont
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -29,6 +33,7 @@ import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
@@ -129,12 +134,15 @@ private fun HomeTab(viewModel: LibraryViewModel, nav: NavState, menu: SongMenuCo
     val playerState by viewModel.playerState.collectAsStateWithLifecycle()
     val currentId = playerState.nowPlaying?.mediaId?.toLongOrNull()
     val list = favorites ?: return
+    val yourMixDismissed by viewModel.settings.yourMixCardDismissed.collectAsStateWithLifecycle()
 
     LazyColumn(Modifier.fillMaxSize(), contentPadding = barPadding(extra = 16.dp)) {
+        // Your Mix is its own, dynamic collection: a separate card ABOVE the Favorites, never mixed into them.
+        if (!yourMixDismissed) item(key = "your-mix") { YourMixCard(onOpen = { nav.push(Screen.YourMix) }, onHide = { viewModel.setYourMixCardDismissed(true) }) }
         item {
             Text(
                 text = stringResource(R.string.favorites),
-                style = DisplayHeavy,
+                style = DisplayHeavy.headingFont(),
                 color = MaterialTheme.colorScheme.onSurface,
                 modifier = Modifier.padding(start = 20.dp, end = 20.dp, top = 4.dp),
             )
@@ -148,6 +156,7 @@ private fun HomeTab(viewModel: LibraryViewModel, nav: NavState, menu: SongMenuCo
                 androidx.compose.material3.FilledTonalButton(
                     onClick = { viewModel.playAll(list, shuffle = true) },
                     enabled = list.isNotEmpty(),
+                    colors = com.localplayer.music.ui.theme.tonalButtonColors(),
                 ) {
                     Icon(AppIcons.Shuffle, contentDescription = null, modifier = Modifier.size(18.dp))
                     Spacer(Modifier.width(8.dp))
@@ -173,7 +182,7 @@ private fun HomeTab(viewModel: LibraryViewModel, nav: NavState, menu: SongMenuCo
         } else {
             item { FavoritesCollage(list.mapNotNull { it.artworkRef() }.distinctBy { it.trackId }.take(3)) }
         }
-        item { LocalMixSection() }
+        if (list.isNotEmpty()) item(key = "fav-header") { SectionHeader(stringResource(R.string.favorite_songs_header)) }
         itemsIndexed(items = list, key = { _, song -> "fav-${song.id}" }) { index, song ->
             TrackRow(
                 song = song,
@@ -247,25 +256,50 @@ private fun FavoritesEmpty() {
     }
 }
 
-/** Empty placeholder only. LocalMix is intentionally NOT implemented. */
+/**
+ * Your Mix: a separate collection built from the library and the local listening data (implemented in a later
+ * phase). Compact tonal card with its own title, so it can never be mistaken for the manual Favorites below.
+ */
 @Composable
-private fun LocalMixSection() {
-    Column(
+private fun YourMixCard(onOpen: () -> Unit, onHide: () -> Unit) {
+    // Tap the card to open the Mix; the cross hides it (Settings > Your Mix shows it again).
+    Row(
         modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp)
             .clip(RoundedCornerShape(24.dp))
-            .background(MaterialTheme.colorScheme.surfaceContainer)
-            .padding(16.dp),
+            .background(MaterialTheme.colorScheme.tertiaryContainer)
+            .clickable(role = androidx.compose.ui.semantics.Role.Button, onClick = onOpen)
+            .padding(start = 16.dp, top = 8.dp, end = 4.dp, bottom = 8.dp),
+        verticalAlignment = Alignment.CenterVertically,
     ) {
-        Text(
-            stringResource(R.string.local_mix_title),
-            style = MaterialTheme.typography.titleMedium,
-            fontWeight = FontWeight.Bold,
-        )
-        Text(
-            stringResource(R.string.local_mix_placeholder),
-            style = MaterialTheme.typography.bodyMedium,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-        )
+        Box(
+            Modifier.size(44.dp).clip(androidx.compose.foundation.shape.CircleShape)
+                .background(MaterialTheme.colorScheme.onTertiaryContainer.copy(alpha = 0.12f)),
+            contentAlignment = Alignment.Center,
+        ) {
+            Icon(AppIcons.MusicNote, contentDescription = null, tint = MaterialTheme.colorScheme.onTertiaryContainer)
+        }
+        Spacer(Modifier.width(14.dp))
+        Column(Modifier.weight(1f)) {
+            Text(
+                stringResource(R.string.your_mix_card_title),
+                style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.Bold,
+                color = MaterialTheme.colorScheme.onTertiaryContainer,
+            )
+            Text(
+                stringResource(R.string.your_mix_card_subtitle),
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onTertiaryContainer,
+            )
+        }
+        IconButton(onClick = onHide) {
+            Icon(
+                AppIcons.Close,
+                contentDescription = stringResource(R.string.your_mix_card_hide),
+                tint = MaterialTheme.colorScheme.onTertiaryContainer,
+                modifier = Modifier.size(20.dp),
+            )
+        }
     }
 }
 
@@ -461,7 +495,7 @@ fun AlbumCard(album: AlbumItem, modifier: Modifier = Modifier, onClick: () -> Un
         Column(Modifier.align(Alignment.BottomStart).padding(12.dp)) {
             Text(
                 album.title ?: unknownAlbum,
-                style = MaterialTheme.typography.titleSmall,
+                style = MaterialTheme.typography.titleSmall.albumGenreFont(),
                 fontWeight = FontWeight.Bold,
                 color = Color.White,
                 maxLines = 1,
@@ -469,7 +503,7 @@ fun AlbumCard(album: AlbumItem, modifier: Modifier = Modifier, onClick: () -> Un
             )
             Text(
                 album.artist ?: unknownArtist,
-                style = MaterialTheme.typography.bodySmall,
+                style = MaterialTheme.typography.bodySmall.artistFont(),
                 color = Color.White.copy(alpha = 0.85f),
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
@@ -532,7 +566,7 @@ private fun ArtistsTab(viewModel: LibraryViewModel, nav: NavState) {
                         )
                         Text(
                             artist.name ?: unknown,
-                            style = MaterialTheme.typography.bodyMedium,
+                            style = MaterialTheme.typography.bodyMedium.artistFont(),
                             fontWeight = FontWeight.SemiBold,
                             maxLines = 1,
                             overflow = TextOverflow.Ellipsis,
@@ -659,7 +693,7 @@ private fun GenreCard(genre: GenreItem, unknown: String, onClick: () -> Unit) {
         Column(Modifier.align(Alignment.BottomStart).padding(16.dp)) {
             Text(
                 genre.name ?: unknown,
-                style = DisplayHeavyCard,
+                style = DisplayHeavyCard.albumGenreFont(),
                 color = content,
                 maxLines = 2,
                 overflow = TextOverflow.Ellipsis,

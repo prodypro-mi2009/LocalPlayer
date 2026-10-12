@@ -96,6 +96,8 @@ import com.localplayer.music.ui.screens.ArtistScreen
 import com.localplayer.music.ui.screens.EditCoverScreen
 import com.localplayer.music.ui.screens.EditMetadataScreen
 import com.localplayer.music.ui.screens.HiddenSongsScreen
+import com.localplayer.music.ui.screens.ColorsScreen
+import com.localplayer.music.ui.screens.FontsScreen
 import com.localplayer.music.ui.screens.LibraryFoldersScreen
 import com.localplayer.music.ui.screens.GenreScreen
 import com.localplayer.music.ui.screens.HomeScreen
@@ -105,7 +107,16 @@ import com.localplayer.music.ui.screens.PlaylistScreen
 import com.localplayer.music.ui.screens.QueueScreen
 import com.localplayer.music.ui.screens.RecentScreen
 import com.localplayer.music.ui.screens.SearchScreen
+import com.localplayer.music.ui.screens.AboutSettingsScreen
+import com.localplayer.music.ui.screens.AppearanceSettingsScreen
+import com.localplayer.music.ui.screens.LanguageSettingsScreen
+import com.localplayer.music.ui.screens.LibrarySettingsScreen
+import com.localplayer.music.ui.screens.LyricsSettingsScreen
 import com.localplayer.music.ui.screens.SettingsScreen
+import com.localplayer.music.ui.screens.TimeUsageScreen
+import com.localplayer.music.ui.screens.Top20Screen
+import com.localplayer.music.ui.screens.YourMixScreen
+import com.localplayer.music.ui.screens.YourMixSettingsScreen
 import com.localplayer.music.ui.screens.YearScreen
 import com.localplayer.music.util.MediaAccess
 import kotlinx.coroutines.launch
@@ -254,9 +265,11 @@ private fun LibraryRoot(viewModel: LibraryViewModel) {
 
     // Accent colour of the current artwork (null = feature off / not available -> theme colours).
     val artworkColors by container.settings.artworkColors.collectAsStateWithLifecycle()
-    val tone by rememberArtworkTone(playerState.nowPlaying?.artwork, artworkColors)
+    val pureMode = com.localplayer.music.ui.theme.LocalPureMode.current
+    // Pure black / white: no artwork colours and no background picture, just the one uniform colour.
+    val tone by rememberArtworkTone(playerState.nowPlaying?.artwork, artworkColors && !pureMode.isOn)
     val backdropBase by animateColorAsState(
-        targetValue = tone ?: MaterialTheme.colorScheme.primaryContainer,
+        targetValue = tone ?: com.localplayer.music.ui.theme.fallbackTint(),
         animationSpec = tween(durationMillis = 500),
         label = "backdropTint",
     )
@@ -272,7 +285,7 @@ private fun LibraryRoot(viewModel: LibraryViewModel) {
     val onLyrics = nav.current == Screen.Lyrics
 
     Box(Modifier.fillMaxSize()) {
-        background?.let {
+        background?.takeIf { !pureMode.isOn }?.let {
             Image(bitmap = it, contentDescription = null, contentScale = ContentScale.Crop, modifier = Modifier.fillMaxSize())
             Box(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background.copy(alpha = backgroundDim)))
         }
@@ -313,6 +326,17 @@ private fun LibraryRoot(viewModel: LibraryViewModel) {
                         is Screen.EditCover -> EditCoverScreen(screen.trackId, nav, container)
                         Screen.HiddenSongs -> HiddenSongsScreen(nav, viewModel)
                         Screen.LibraryFolders -> LibraryFoldersScreen(nav, viewModel)
+                        Screen.Colors -> ColorsScreen(nav, viewModel)
+                        Screen.Fonts -> FontsScreen(nav, viewModel)
+                        Screen.SettingsAppearance -> AppearanceSettingsScreen(nav, viewModel)
+                        Screen.SettingsLanguage -> LanguageSettingsScreen(nav, viewModel)
+                        Screen.SettingsLibrary -> LibrarySettingsScreen(nav, viewModel)
+                        Screen.SettingsLyrics -> LyricsSettingsScreen(nav, viewModel)
+                        Screen.SettingsYourMix -> YourMixSettingsScreen(nav, viewModel)
+                        Screen.SettingsAbout -> AboutSettingsScreen(nav)
+                        Screen.YourMix -> YourMixScreen(nav, viewModel, menu)
+                        Screen.TimeUsage -> TimeUsageScreen(nav, viewModel)
+                        Screen.Top20 -> Top20Screen(nav, viewModel)
                     }
                 }
             }
@@ -320,7 +344,7 @@ private fun LibraryRoot(viewModel: LibraryViewModel) {
 
         // Floating bottom bars: they stay fixed at the bottom but are translucent and sit on a soft gradient, so the
         // lists keep scrolling visibly underneath them instead of stopping at a solid black rectangle.
-        val scrimBase = if (onLyrics) Color.Black else MaterialTheme.colorScheme.background
+        val scrimBase = if (onLyrics && !pureMode.isOn) Color.Black else MaterialTheme.colorScheme.background
         Box(
             Modifier
                 .align(Alignment.BottomCenter)
@@ -376,6 +400,7 @@ private fun LibraryRoot(viewModel: LibraryViewModel) {
                             color = (tone?.let { lerp(MaterialTheme.colorScheme.surfaceContainerHigh, it, 0.22f) }
                                 ?: MaterialTheme.colorScheme.surfaceContainerHigh).copy(alpha = BAR_SURFACE_ALPHA),
                             shape = androidx.compose.foundation.shape.RoundedCornerShape(20.dp),
+                            border = if (pureMode.isOn) androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant) else null,
                             modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
                         ) {
                             MiniPlayer(

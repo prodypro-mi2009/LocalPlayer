@@ -12,6 +12,10 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import com.localplayer.music.data.ThemeMode
+import com.localplayer.music.data.personalization.ControlColors
+import com.localplayer.music.data.personalization.PureMode
+import com.localplayer.music.data.personalization.PurePalette
+import androidx.compose.runtime.compositionLocalOf
 
 /** All fixed colors of the app live here. */
 object AppColors {
@@ -70,9 +74,12 @@ private val fallbackLight = lightColorScheme(
 fun LocalPlayerTheme(
     themeMode: ThemeMode,
     dynamicColor: Boolean,
+    controlColors: com.localplayer.music.data.personalization.ControlColors = com.localplayer.music.data.personalization.ControlColors.None,
+    fonts: AppFonts = AppFonts.Default,
+    pureMode: PureMode = PureMode.OFF,
     content: @Composable () -> Unit,
 ) {
-    val dark = themeMode.isDark(isSystemInDarkTheme())
+    val dark = pureMode.forcedDark ?: themeMode.isDark(isSystemInDarkTheme())
     val context = LocalContext.current
     val base: ColorScheme = when {
         dynamicColor && Build.VERSION.SDK_INT >= Build.VERSION_CODES.S ->
@@ -81,6 +88,73 @@ fun LocalPlayerTheme(
         else -> fallbackLight
     }
     val pure = if (dark) AppColors.TrueBlack else AppColors.TrueWhite
-    val scheme = base.copy(background = pure, surface = pure)
-    MaterialTheme(colorScheme = scheme, content = content)
+    val palette = PurePalette.of(pureMode)
+    val scheme = if (palette != null) pureScheme(palette) else base.copy(background = pure, surface = pure)
+    androidx.compose.runtime.CompositionLocalProvider(
+        // Pure mode: buttons are exactly the opposite of the background, so the user's own colours are not applied.
+        LocalControlColors provides (if (palette != null) ControlColors.None else controlColors),
+        LocalPureMode provides pureMode,
+        LocalAppFonts provides fonts,
+    ) {
+        MaterialTheme(colorScheme = scheme, typography = appTypography(fonts), content = content)
+    }
 }
+
+/** The current pure mode, for the few places that draw their own backdrops (artwork tint, lyrics page). */
+val LocalPureMode = compositionLocalOf { PureMode.OFF }
+
+/**
+ * Pure black / pure white: every surface role is the ONE background colour, every control (primary, tonal and
+ * container colours, text, icons) is exactly the opposite colour, and the rest is neutral grey. No hue anywhere.
+ * Only the error colour keeps its red (a warning must stay recognisable); the Favorite heart is drawn separately.
+ */
+private fun pureScheme(p: PurePalette): ColorScheme {
+    val bg = Color(p.surface)
+    val fg = Color(p.control)
+    val grey = Color(p.secondaryText)
+    val dark = p.surface == PurePalette.BLACK
+    val base = if (dark) darkColorScheme() else lightColorScheme()
+    return base.copy(
+        primary = fg, onPrimary = bg,
+        primaryContainer = fg, onPrimaryContainer = bg,
+        inversePrimary = bg,
+        secondary = fg, onSecondary = bg,
+        // Neutral grey (not the control colour): slider/progress tracks and swipe backgrounds must differ from the controls.
+        secondaryContainer = Color(p.outlineVariant), onSecondaryContainer = fg,
+        tertiary = fg, onTertiary = bg,
+        tertiaryContainer = fg, onTertiaryContainer = bg,
+        background = bg, onBackground = fg,
+        surface = bg, onSurface = fg,
+        surfaceVariant = bg, onSurfaceVariant = grey,
+        surfaceTint = bg,
+        inverseSurface = fg, inverseOnSurface = bg,
+        outline = Color(p.outline), outlineVariant = Color(p.outlineVariant),
+        scrim = Color.Black,
+        surfaceBright = bg, surfaceDim = bg,
+        surfaceContainerLowest = bg, surfaceContainerLow = bg, surfaceContainer = bg,
+        surfaceContainerHigh = bg, surfaceContainerHighest = bg,
+    )
+}
+
+/** Tint behind the player/lyrics/backdrop when there is no artwork tone: the theme colour, or plain background in pure mode. */
+@Composable
+fun fallbackTint(): Color =
+    if (LocalPureMode.current.isOn) MaterialTheme.colorScheme.background else MaterialTheme.colorScheme.primaryContainer
+
+/** Background of the row of the song that is playing now (a neutral grey in pure mode so the text stays readable). */
+@Composable
+fun currentRowColor(alpha: Float): Color =
+    if (LocalPureMode.current.isOn) MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.6f)
+    else MaterialTheme.colorScheme.primaryContainer.copy(alpha = alpha)
+
+/** Filled tonal buttons: exactly the opposite of the background in pure mode, the normal tonal colours otherwise. */
+@Composable
+fun tonalButtonColors(): androidx.compose.material3.ButtonColors =
+    if (LocalPureMode.current.isOn) {
+        androidx.compose.material3.ButtonDefaults.filledTonalButtonColors(
+            containerColor = MaterialTheme.colorScheme.primary,
+            contentColor = MaterialTheme.colorScheme.onPrimary,
+        )
+    } else {
+        androidx.compose.material3.ButtonDefaults.filledTonalButtonColors()
+    }

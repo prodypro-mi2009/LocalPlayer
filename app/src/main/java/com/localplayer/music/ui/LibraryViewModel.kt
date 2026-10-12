@@ -405,6 +405,67 @@ class LibraryViewModel(private val container: AppContainer) : ViewModel() {
     fun setTabOrder(order: List<LibraryTab>) = settings.setTabOrder(TabOrder.serialize(order))
     fun resetTabOrder() = settings.setTabOrder(null)
 
+    fun setControlColor(group: com.localplayer.music.data.personalization.ControlColorGroup, argb: Int?) =
+        settings.setControlColors(settings.controlColors.value.with(group, argb))
+    fun resetControlColors() = settings.setControlColors(com.localplayer.music.data.personalization.ControlColors.None)
+
+    fun setFont(category: com.localplayer.music.data.personalization.FontCategory, choice: com.localplayer.music.data.personalization.FontChoice) =
+        settings.setFontChoices(settings.fontChoices.value.with(category, choice))
+    fun resetFonts() = settings.setFontChoices(com.localplayer.music.data.personalization.FontChoices.Default)
+
+    fun importCustomFont(uri: Uri) {
+        viewModelScope.launch {
+            if (!container.customFont.import(uri)) _messages.tryEmit(UiMessage(R.string.font_import_failed))
+        }
+    }
+
+    fun removeCustomFont() {
+        container.customFont.remove()
+        // Categories that used the imported font go back to the default font.
+        var choices = settings.fontChoices.value
+        for (c in com.localplayer.music.data.personalization.FontCategory.entries) {
+            if (choices[c] == com.localplayer.music.data.personalization.FontChoice.CUSTOM) {
+                choices = choices.with(c, com.localplayer.music.data.personalization.FontChoice.DEFAULT)
+            }
+        }
+        settings.setFontChoices(choices)
+    }
+
+    fun setPureMode(mode: com.localplayer.music.data.personalization.PureMode) = settings.setPureMode(mode)
+    fun setLyricsAlignment(value: com.localplayer.music.data.personalization.LyricsAlignment) = settings.setLyricsAlignment(value)
+    fun setYourMixCardDismissed(value: Boolean) = settings.setYourMixCardDismissed(value)
+
+    // --- listening statistics ---
+    private val stats = container.stats
+
+    fun listenedMs(range: com.localplayer.music.data.stats.DayRange): Flow<Long> = stats.listenedMs(range)
+    fun playsIn(range: com.localplayer.music.data.stats.DayRange): Flow<Int> = stats.plays(range)
+    fun top20(range: com.localplayer.music.data.stats.DayRange): Flow<List<com.localplayer.music.data.db.TopTrackRow>> = stats.top20(range)
+
+    // --- Your Mix ---
+    /** [loading] is true until the first Mix is ready; [tracks] is never null so the screen can always draw. */
+    data class MixUi(
+        val loading: Boolean = true,
+        val tracks: List<TrackListItem> = emptyList(),
+        val notice: com.localplayer.music.data.mix.MixNotice = com.localplayer.music.data.mix.MixNotice.NONE,
+        val generatedAt: Long = 0L,
+    )
+
+    private val _mix = MutableStateFlow(MixUi())
+    val mix: StateFlow<MixUi> = _mix.asStateFlow()
+    private var mixJob: kotlinx.coroutines.Job? = null
+
+    /** Loads the saved Mix or rebuilds it when it is out of date ([force] = the refresh button). One job at a time. */
+    fun loadMix(force: Boolean = false) {
+        mixJob?.cancel()
+        mixJob = viewModelScope.launch {
+            val out = withContext(Dispatchers.IO) { container.mix.load(force) }
+            _mix.value = MixUi(false, out.tracks, out.notice, out.generatedAt)
+        }
+    }
+
+    fun setMixSettings(value: com.localplayer.music.data.mix.MixSettings) = settings.setMixSettings(value)
+
     fun setBackgroundDim(value: Float) = settings.setBackgroundDim(value)
 
     fun resetBackground() = container.background.reset()

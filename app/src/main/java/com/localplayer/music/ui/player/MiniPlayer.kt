@@ -1,5 +1,10 @@
 package com.localplayer.music.ui.player
 
+import com.localplayer.music.ui.theme.controlColor
+import com.localplayer.music.data.personalization.ControlColorGroup
+import androidx.compose.material3.IconButtonDefaults
+import com.localplayer.music.ui.theme.artistFont
+import com.localplayer.music.ui.theme.songTitleFont
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -52,31 +57,35 @@ fun MiniPlayer(
             Column(modifier = Modifier.weight(1f)) {
                 Text(
                     text = now.title,
-                    style = MaterialTheme.typography.bodyLarge,
+                    style = MaterialTheme.typography.bodyLarge.songTitleFont(),
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
                 )
                 Text(
                     text = now.artist,
-                    style = MaterialTheme.typography.bodySmall,
+                    style = MaterialTheme.typography.bodySmall.artistFont(),
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
                 )
             }
-            IconButton(onClick = onPrevious) {
+            val skipColor = controlColor(ControlColorGroup.PREV_NEXT)
+            val skipColors = if (skipColor != null) IconButtonDefaults.iconButtonColors(contentColor = skipColor) else IconButtonDefaults.iconButtonColors()
+            val playColor = controlColor(ControlColorGroup.PLAY_PAUSE)
+            val playColors = if (playColor != null) IconButtonDefaults.iconButtonColors(contentColor = playColor) else IconButtonDefaults.iconButtonColors()
+            IconButton(onClick = onPrevious, colors = skipColors) {
                 Icon(
                     imageVector = AppIcons.SkipPrevious,
                     contentDescription = stringResource(R.string.previous_track),
                 )
             }
-            IconButton(onClick = onTogglePlayPause) {
+            IconButton(onClick = onTogglePlayPause, colors = playColors) {
                 Icon(
                     imageVector = if (isPlaying) AppIcons.Pause else AppIcons.Play,
                     contentDescription = stringResource(if (isPlaying) R.string.pause else R.string.play),
                 )
             }
-            IconButton(onClick = onNext, enabled = hasNext) {
+            IconButton(onClick = onNext, enabled = hasNext, colors = skipColors) {
                 Icon(
                     imageVector = AppIcons.SkipNext,
                     contentDescription = stringResource(R.string.next_track),

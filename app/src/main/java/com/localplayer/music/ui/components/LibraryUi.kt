@@ -1,5 +1,6 @@
 package com.localplayer.music.ui.components
 
+import com.localplayer.music.ui.theme.albumGenreFont
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectTapGestures
@@ -72,7 +73,7 @@ fun LibraryActionRow(
         modifier = modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 4.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        FilledTonalButton(onClick = onShuffle) {
+        FilledTonalButton(onClick = onShuffle, colors = com.localplayer.music.ui.theme.tonalButtonColors()) {
             Icon(AppIcons.Shuffle, contentDescription = null, modifier = Modifier.size(18.dp))
             Spacer(Modifier.width(8.dp))
             Text(stringResource(R.string.shuffle))
@@ -190,7 +191,7 @@ fun SongGridCard(
         modifier = modifier
             .clip(RoundedCornerShape(20.dp))
             .background(
-                if (isCurrent) MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.55f)
+                if (isCurrent) com.localplayer.music.ui.theme.currentRowColor(0.55f)
                 else MaterialTheme.colorScheme.surfaceContainerLow,
             )
             .clickable(onClick = onClick)
@@ -319,7 +320,7 @@ fun DetailHero(
         }
         Text(
             text = title,
-            style = com.localplayer.music.ui.theme.DisplayHeavyCard.copy(fontSize = 28.sp, lineHeight = 32.sp),
+            style = com.localplayer.music.ui.theme.DisplayHeavyCard.copy(fontSize = 28.sp, lineHeight = 32.sp).albumGenreFont(),
             textAlign = TextAlign.Center,
             maxLines = 3,
             overflow = TextOverflow.Ellipsis,
@@ -338,7 +339,7 @@ fun DetailHero(
                 Spacer(Modifier.width(8.dp))
                 Text(stringResource(R.string.play))
             }
-            FilledTonalButton(onClick = onShuffle) {
+            FilledTonalButton(onClick = onShuffle, colors = com.localplayer.music.ui.theme.tonalButtonColors()) {
                 Icon(AppIcons.Shuffle, contentDescription = null, modifier = Modifier.size(20.dp))
                 Spacer(Modifier.width(8.dp))
                 Text(stringResource(R.string.shuffle))

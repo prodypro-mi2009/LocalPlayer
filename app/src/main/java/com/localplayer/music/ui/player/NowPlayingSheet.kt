@@ -1,5 +1,12 @@
 package com.localplayer.music.ui.player
 
+import com.localplayer.music.ui.theme.onColorFor
+import com.localplayer.music.ui.theme.controlColor
+import com.localplayer.music.data.personalization.ControlColorGroup
+import androidx.compose.material3.IconButtonDefaults
+import com.localplayer.music.ui.theme.albumGenreFont
+import com.localplayer.music.ui.theme.artistFont
+import com.localplayer.music.ui.theme.songTitleFont
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.DropdownMenu
 import androidx.activity.compose.BackHandler
@@ -105,7 +112,7 @@ fun NowPlayingScreen(
 
     // Full-strength tone; the alpha curve (and the fade to the plain background) is [artworkVerticalBrush].
     val glow by animateColorAsState(
-        targetValue = tone ?: MaterialTheme.colorScheme.primaryContainer,
+        targetValue = tone ?: com.localplayer.music.ui.theme.fallbackTint(),
         animationSpec = tween(durationMillis = 500),
         label = "nowPlayingGlow",
     )
@@ -182,23 +189,25 @@ fun NowPlayingScreen(
                         Spacer(Modifier.height(20.dp))
                         Row(Modifier.fillMaxWidth().height(88.dp), verticalAlignment = Alignment.CenterVertically) {
                             Column(Modifier.weight(1f)) {
+                                val labelColor = controlColor(ControlColorGroup.NOW_PLAYING_TEXT)
                                 Text(
                                     track.title,
-                                    style = MaterialTheme.typography.titleLarge,
+                                    style = MaterialTheme.typography.titleLarge.songTitleFont(),
+                                    color = labelColor ?: Color.Unspecified,
                                     maxLines = 1,
                                     overflow = TextOverflow.Ellipsis,
                                 )
                                 Text(
                                     track.artist,
-                                    style = MaterialTheme.typography.bodyLarge,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    style = MaterialTheme.typography.bodyLarge.artistFont(),
+                                    color = labelColor ?: MaterialTheme.colorScheme.onSurfaceVariant,
                                     maxLines = 1,
                                     overflow = TextOverflow.Ellipsis,
                                 )
                                 Text(
                                     track.album,
-                                    style = MaterialTheme.typography.bodySmall,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    style = MaterialTheme.typography.bodySmall.albumGenreFont(),
+                                    color = labelColor ?: MaterialTheme.colorScheme.onSurfaceVariant,
                                     maxLines = 1,
                                     overflow = TextOverflow.Ellipsis,
                                 )
@@ -222,9 +231,10 @@ fun NowPlayingScreen(
                     activeColor = tone ?: MaterialTheme.colorScheme.primary,
                     trackColor = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.2f),
                 )
+                val timeColor = controlColor(ControlColorGroup.NOW_PLAYING_TEXT) ?: Color.Unspecified
                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                    Text(formatDuration((fraction * duration).toLong()), style = MaterialTheme.typography.labelMedium)
-                    Text(formatDuration(duration), style = MaterialTheme.typography.labelMedium)
+                    Text(formatDuration((fraction * duration).toLong()), style = MaterialTheme.typography.labelMedium, color = timeColor)
+                    Text(formatDuration(duration), style = MaterialTheme.typography.labelMedium, color = timeColor)
                 }
                 // Fixed-height slot, so the chip appearing later never moves the controls.
                 Box(Modifier.fillMaxWidth().height(44.dp), contentAlignment = Alignment.Center) {
@@ -233,6 +243,8 @@ fun NowPlayingScreen(
                             Text(
                                 it,
                                 style = MaterialTheme.typography.labelMedium,
+                                color = controlColor(ControlColorGroup.NOW_PLAYING_TEXT, MaterialTheme.colorScheme.surfaceContainerHigh)
+                                    ?: Color.Unspecified,
                                 modifier = Modifier.padding(horizontal = 14.dp, vertical = 6.dp),
                             )
                         }
@@ -240,17 +252,25 @@ fun NowPlayingScreen(
                 }
 
                 Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(20.dp)) {
-                    IconButton(onClick = viewModel::previous, modifier = Modifier.size(64.dp)) {
+                    val skipColor = controlColor(ControlColorGroup.PREV_NEXT)
+                    val skipColors = if (skipColor != null) IconButtonDefaults.iconButtonColors(contentColor = skipColor) else IconButtonDefaults.iconButtonColors()
+                    val playColor = controlColor(ControlColorGroup.PLAY_PAUSE)
+                    val playColors = if (playColor != null) {
+                        IconButtonDefaults.filledIconButtonColors(containerColor = playColor, contentColor = onColorFor(playColor))
+                    } else {
+                        IconButtonDefaults.filledIconButtonColors()
+                    }
+                    IconButton(onClick = viewModel::previous, colors = skipColors, modifier = Modifier.size(64.dp)) {
                         Icon(AppIcons.SkipPrevious, stringResource(R.string.previous_track), Modifier.size(36.dp))
                     }
-                    FilledIconButton(onClick = viewModel::togglePlayPause, modifier = Modifier.size(80.dp)) {
+                    FilledIconButton(onClick = viewModel::togglePlayPause, colors = playColors, modifier = Modifier.size(80.dp)) {
                         Icon(
                             imageVector = if (state.isPlaying) AppIcons.Pause else AppIcons.Play,
                             contentDescription = stringResource(if (state.isPlaying) R.string.pause else R.string.play),
                             modifier = Modifier.size(44.dp),
                         )
                     }
-                    IconButton(onClick = viewModel::next, enabled = state.hasNext, modifier = Modifier.size(64.dp)) {
+                    IconButton(onClick = viewModel::next, enabled = state.hasNext, colors = skipColors, modifier = Modifier.size(64.dp)) {
                         Icon(AppIcons.SkipNext, stringResource(R.string.next_track), Modifier.size(36.dp))
                     }
                 }
@@ -317,7 +337,13 @@ private fun Segment(
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    val tint = if (active) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant
+    // The user's colour for this button group (if any) is used for icon AND label; "on" is then shown by a bold
+    // label and a dot as well, because colour alone must not be the only sign.
+    val barColor = MaterialTheme.colorScheme.surfaceContainerHigh
+    val custom = controlColor(ControlColorGroup.PLAYBACK_OPTIONS, barColor)
+    val customText = controlColor(ControlColorGroup.NOW_PLAYING_TEXT, barColor)
+    val tint = custom ?: if (active) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant
+    val labelTint = customText ?: tint
     Column(
         modifier = modifier
             .heightIn(min = 64.dp)
@@ -327,7 +353,17 @@ private fun Segment(
         verticalArrangement = Arrangement.Center,
     ) {
         Icon(icon, contentDescription = null, tint = tint)
-        Text(label, style = MaterialTheme.typography.labelSmall, color = tint, maxLines = 1, textAlign = TextAlign.Center)
+        Text(
+            label,
+            style = MaterialTheme.typography.labelSmall,
+            fontWeight = if (active && custom != null) androidx.compose.ui.text.font.FontWeight.Bold else null,
+            color = labelTint,
+            maxLines = 1,
+            textAlign = TextAlign.Center,
+        )
+        if (active && custom != null) {
+            Box(Modifier.padding(top = 2.dp).size(4.dp).background(tint, androidx.compose.foundation.shape.CircleShape))
+        }
     }
 }
 

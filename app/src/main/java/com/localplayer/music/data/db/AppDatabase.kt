@@ -18,8 +18,9 @@ import androidx.sqlite.db.SupportSQLiteDatabase
         HiddenTrackEntity::class,
         ExcludedFolderEntity::class,
         LibraryFolderEntity::class,
+        ListeningDayEntity::class,
     ],
-    version = 6,
+    version = 7,
     exportSchema = true,
 )
 abstract class AppDatabase : RoomDatabase() {
@@ -29,6 +30,7 @@ abstract class AppDatabase : RoomDatabase() {
     abstract fun favoriteDao(): FavoriteDao
     abstract fun hiddenDao(): HiddenDao
     abstract fun folderDao(): FolderDao
+    abstract fun listeningDao(): ListeningDao
 
     companion object {
         /**
@@ -62,6 +64,20 @@ abstract class AppDatabase : RoomDatabase() {
                 migration5to6Statements.forEach { db.execSQL(it) }
             }
         }
+
+        /** 6 -> 7: listening statistics (time usage, play counts). A new table only; every existing row is kept. */
+        val MIGRATION_6_7 = object : Migration(6, 7) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                migration6to7Statements.forEach { db.execSQL(it) }
+            }
+        }
+
+        val migration6to7Statements: List<String> = listOf(
+            "CREATE TABLE IF NOT EXISTS `listening_days` (`day` INTEGER NOT NULL, `trackUri` TEXT NOT NULL, " +
+                "`listenedMs` INTEGER NOT NULL, `plays` INTEGER NOT NULL, `lastListenedAt` INTEGER NOT NULL, " +
+                "PRIMARY KEY(`day`, `trackUri`))",
+            "CREATE INDEX IF NOT EXISTS `index_listening_days_trackUri` ON `listening_days` (`trackUri`)",
+        )
 
         val migration5to6Statements: List<String> = listOf(
             "ALTER TABLE `tracks` ADD COLUMN `folderKey` TEXT",
@@ -115,7 +131,7 @@ abstract class AppDatabase : RoomDatabase() {
 
         fun create(context: Context): AppDatabase =
             Room.databaseBuilder(context, AppDatabase::class.java, "library.db")
-                .addMigrations(MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6)
+                .addMigrations(MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7)
                 // Versions 1-2 (early folder-picker builds) held only a rebuildable index.
                 // Version 3 -> 4 is a real migration; there is no destructive path from 3.
                 .fallbackToDestructiveMigrationFrom(true, 1, 2)

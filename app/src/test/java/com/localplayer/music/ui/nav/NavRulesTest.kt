@@ -135,3 +135,44 @@ class NavRulesTest {
         assertEquals(listOf<Screen>(Screen.Home), list)
     }
 }
+
+class AppearanceRoutesTest {
+    @org.junit.Test fun colorsAndFontsAreSingletonsAndSurviveEncoding() {
+        for (screen in listOf(Screen.Colors, Screen.Fonts)) {
+            org.junit.Assert.assertTrue(NavRules.isSingleton(screen))
+            org.junit.Assert.assertEquals(screen, decodeScreen(screen.encode()))
+        }
+    }
+}
+
+class SettingsRoutesTest {
+    @org.junit.Test fun everySettingsSubScreenIsASingletonAndSurvivesEncoding() {
+        val all = listOf(
+            Screen.SettingsAppearance, Screen.SettingsLanguage, Screen.SettingsLibrary,
+            Screen.SettingsLyrics, Screen.SettingsYourMix, Screen.SettingsAbout,
+        )
+        for (screen in all) {
+            org.junit.Assert.assertTrue(NavRules.isSingleton(screen))
+            org.junit.Assert.assertEquals(screen, decodeScreen(screen.encode()))
+        }
+        org.junit.Assert.assertEquals(all.size, all.map { it.encode() }.toSet().size)
+    }
+
+    @org.junit.Test fun appearanceToColorsIsOneBackPressPerLevel() {
+        val home = listOf<Screen>(Screen.Home)
+        var stack = NavRules.push(NavRules.push(NavRules.push(home, Screen.Settings), Screen.SettingsAppearance), Screen.Colors)
+        stack = NavRules.push(stack, Screen.Colors)                       // double tap: ignored
+        org.junit.Assert.assertEquals(listOf(Screen.Home, Screen.Settings, Screen.SettingsAppearance, Screen.Colors), stack)
+        stack = NavRules.pop(stack)!!
+        org.junit.Assert.assertEquals(Screen.SettingsAppearance, stack.last())
+        stack = NavRules.pop(stack)!!
+        org.junit.Assert.assertEquals(Screen.Settings, stack.last())
+    }
+
+    @org.junit.Test fun statsAndMixScreensAreSingletonsAndSurviveEncoding() {
+        for (screen in listOf(Screen.YourMix, Screen.TimeUsage, Screen.Top20)) {
+            org.junit.Assert.assertTrue(NavRules.isSingleton(screen))
+            org.junit.Assert.assertEquals(screen, decodeScreen(screen.encode()))
+        }
+    }
+}

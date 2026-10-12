@@ -32,8 +32,8 @@ android {
         applicationId = "com.localplayer.music"
         minSdk = 26
         targetSdk = 36
-        versionCode = 8
-        versionName = "1.0.2"
+        versionCode = 10
+        versionName = "1.0.4"
 
         // ARM64 first. There is no native code in this app yet, so this only
         // guarantees that no unneeded architectures are ever packaged.

@@ -1,5 +1,8 @@
 package com.localplayer.music.ui.components
 
+import com.localplayer.music.ui.theme.onColorFor
+import com.localplayer.music.ui.theme.controlColor
+import com.localplayer.music.data.personalization.ControlColorGroup
 import androidx.annotation.StringRes
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -124,8 +127,13 @@ fun LibraryBottomNav(
 
 @Composable
 private fun PillTab(label: String, selected: Boolean, onClick: () -> Unit) {
-    val container = if (selected) MaterialTheme.colorScheme.primaryContainer else androidx.compose.ui.graphics.Color.Transparent
-    val content = if (selected) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onSurfaceVariant
+    val custom = controlColor(ControlColorGroup.NAVIGATION, MaterialTheme.colorScheme.surfaceContainer)
+    val container = if (selected) custom ?: MaterialTheme.colorScheme.primaryContainer else androidx.compose.ui.graphics.Color.Transparent
+    val content = if (selected) {
+        if (custom != null) onColorFor(custom) else MaterialTheme.colorScheme.onPrimaryContainer
+    } else {
+        MaterialTheme.colorScheme.onSurfaceVariant
+    }
     Box(
         modifier = Modifier
             .heightIn(min = TouchTarget)

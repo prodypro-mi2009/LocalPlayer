@@ -1,5 +1,9 @@
 package com.localplayer.music.ui.components
 
+import com.localplayer.music.ui.theme.albumGenreFont
+import com.localplayer.music.ui.theme.artistFont
+import com.localplayer.music.ui.theme.songTitleFont
+import com.localplayer.music.ui.theme.headingFont
 import androidx.compose.foundation.clickable
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.draw.clip
@@ -77,7 +81,7 @@ fun EmptyState(text: String, modifier: Modifier = Modifier) {
 fun SectionHeader(text: String) {
     Text(
         text = text,
-        style = MaterialTheme.typography.titleSmall,
+        style = MaterialTheme.typography.titleSmall.headingFont(),
         color = MaterialTheme.colorScheme.primary,
         modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
     )
@@ -105,7 +109,7 @@ fun TrackRow(
             .padding(horizontal = 12.dp, vertical = 3.dp)
             .clip(RoundedCornerShape(18.dp))
             .background(
-                if (isCurrent) MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.6f)
+                if (isCurrent) com.localplayer.music.ui.theme.currentRowColor(0.6f)
                 else MaterialTheme.colorScheme.surfaceContainerLow,
             )
             .clickable(onClickLabel = playLabel, onClick = onClick)
@@ -127,7 +131,7 @@ fun TrackRow(
         Column(modifier = Modifier.weight(1f)) {
             Text(
                 text = song.title,
-                style = MaterialTheme.typography.bodyLarge,
+                style = MaterialTheme.typography.bodyLarge.songTitleFont(),
                 fontWeight = if (isCurrent) FontWeight.Bold else FontWeight.Normal,
                 color = if (isCurrent) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onSurface,
                 maxLines = 1,
@@ -135,7 +139,7 @@ fun TrackRow(
             )
             Text(
                 text = "${song.artist ?: unknownArtist} • ${song.album ?: unknownAlbum}",
-                style = MaterialTheme.typography.bodySmall,
+                style = MaterialTheme.typography.bodySmall.artistFont(),
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
@@ -202,7 +206,15 @@ fun DetailTopBar(
 }
 
 @Composable
-fun ArtworkRow(artwork: ArtworkRef?, size: Dp, title: String, subtitle: String, onClick: () -> Unit) {
+fun ArtworkRow(
+    artwork: ArtworkRef?,
+    size: Dp,
+    title: String,
+    subtitle: String,
+    onClick: () -> Unit,
+    /** True when [title] is an artist name (uses the artist font); otherwise an album/playlist title. */
+    isArtist: Boolean = false,
+) {
     Row(
         modifier = Modifier
             .fillMaxWidth()
@@ -213,7 +225,12 @@ fun ArtworkRow(artwork: ArtworkRef?, size: Dp, title: String, subtitle: String, 
         ArtworkImage(artwork = artwork, size = size, cornerRadius = size / 2)
         Spacer(Modifier.width(12.dp))
         Column(Modifier.weight(1f)) {
-            Text(title, style = MaterialTheme.typography.bodyLarge, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            Text(
+                title,
+                style = MaterialTheme.typography.bodyLarge.let { if (isArtist) it.artistFont() else it.albumGenreFont() },
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
             Text(
                 subtitle,
                 style = MaterialTheme.typography.bodySmall,
@@ -233,7 +250,7 @@ fun TextRow(title: String, subtitle: String, onClick: () -> Unit) {
             .clickable(onClick = onClick)
             .padding(horizontal = 16.dp, vertical = 12.dp),
     ) {
-        Text(title, style = MaterialTheme.typography.bodyLarge, maxLines = 1, overflow = TextOverflow.Ellipsis)
+        Text(title, style = MaterialTheme.typography.bodyLarge.albumGenreFont(), maxLines = 1, overflow = TextOverflow.Ellipsis)
         Text(
             subtitle,
             style = MaterialTheme.typography.bodySmall,

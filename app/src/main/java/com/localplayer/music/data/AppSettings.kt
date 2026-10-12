@@ -2,6 +2,12 @@ package com.localplayer.music.data
 
 import android.content.Context
 import android.os.Build
+import com.localplayer.music.data.mix.MixRefresh
+import com.localplayer.music.data.mix.MixSettings
+import com.localplayer.music.data.personalization.ControlColors
+import com.localplayer.music.data.personalization.FontChoices
+import com.localplayer.music.data.personalization.LyricsAlignment
+import com.localplayer.music.data.personalization.PureMode
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -89,7 +95,85 @@ class AppSettings(context: Context) {
         _tabOrder.value = raw
     }
 
+    private val _controlColors = MutableStateFlow(ControlColors.parse(prefs.getString(KEY_CONTROL_COLORS, null)))
+    /** The user's own colours per button group (empty = normal theme colours). */
+    val controlColors: StateFlow<ControlColors> = _controlColors.asStateFlow()
+
+    fun setControlColors(colors: ControlColors) {
+        prefs.edit().apply { colors.serialize()?.let { putString(KEY_CONTROL_COLORS, it) } ?: remove(KEY_CONTROL_COLORS) }.apply()
+        _controlColors.value = colors
+    }
+
+    private val _fontChoices = MutableStateFlow(FontChoices.parse(prefs.getString(KEY_FONT_CHOICES, null)))
+    /** The user's font per text category (empty = default fonts). */
+    val fontChoices: StateFlow<FontChoices> = _fontChoices.asStateFlow()
+
+    fun setFontChoices(choices: FontChoices) {
+        prefs.edit().apply { choices.serialize()?.let { putString(KEY_FONT_CHOICES, it) } ?: remove(KEY_FONT_CHOICES) }.apply()
+        _fontChoices.value = choices
+    }
+
+    private val _customFontVersion = MutableStateFlow(prefs.getLong(KEY_CUSTOM_FONT, 0L))
+    /** 0 = no imported font file; otherwise changes every time a font is imported (so the UI reloads it). */
+    val customFontVersion: StateFlow<Long> = _customFontVersion.asStateFlow()
+
+    fun setCustomFontVersion(version: Long) {
+        prefs.edit().putLong(KEY_CUSTOM_FONT, version).apply()
+        _customFontVersion.value = version
+    }
+
+    private val _pureMode = MutableStateFlow(PureMode.fromKey(prefs.getString(KEY_PURE_MODE, null)))
+    /** Pure black / pure white appearance (OFF = normal theme). */
+    val pureMode: StateFlow<PureMode> = _pureMode.asStateFlow()
+
+    fun setPureMode(mode: PureMode) {
+        prefs.edit().putString(KEY_PURE_MODE, mode.key).apply()
+        _pureMode.value = mode
+    }
+
+    private val _lyricsAlignment = MutableStateFlow(LyricsAlignment.fromKey(prefs.getString(KEY_LYRICS_ALIGNMENT, null)))
+    val lyricsAlignment: StateFlow<LyricsAlignment> = _lyricsAlignment.asStateFlow()
+
+    fun setLyricsAlignment(value: LyricsAlignment) {
+        prefs.edit().putString(KEY_LYRICS_ALIGNMENT, value.key).apply()
+        _lyricsAlignment.value = value
+    }
+
+    private val _yourMixCardDismissed = MutableStateFlow(prefs.getBoolean(KEY_YOUR_MIX_DISMISSED, false))
+    /** True after the user tapped the Your Mix card away on Home; Settings > Your Mix brings it back. */
+    val yourMixCardDismissed: StateFlow<Boolean> = _yourMixCardDismissed.asStateFlow()
+
+    fun setYourMixCardDismissed(value: Boolean) {
+        prefs.edit().putBoolean(KEY_YOUR_MIX_DISMISSED, value).apply()
+        _yourMixCardDismissed.value = value
+    }
+
+    private val _mixSettings = MutableStateFlow(MixSettings.parse(prefs.getString(KEY_MIX_SETTINGS, null)))
+    /** How Your Mix is built (strategy, size, window, recency weight, variety, avoid-recent). */
+    val mixSettings: StateFlow<MixSettings> = _mixSettings.asStateFlow()
+
+    fun setMixSettings(value: MixSettings) {
+        val v = value.normalized()
+        prefs.edit().putString(KEY_MIX_SETTINGS, v.serialize()).apply()
+        _mixSettings.value = v
+    }
+
+    /** The last generated Mix, so it stays the same between launches until it needs a refresh. */
+    var mixSnapshot: MixRefresh.Snapshot?
+        get() = MixRefresh.Snapshot.parse(prefs.getString(KEY_MIX_SNAPSHOT, null))
+        set(value) {
+            prefs.edit().apply { if (value == null) remove(KEY_MIX_SNAPSHOT) else putString(KEY_MIX_SNAPSHOT, value.serialize()) }.apply()
+        }
+
     companion object {
+        private const val KEY_MIX_SETTINGS = "mixSettings"
+        private const val KEY_MIX_SNAPSHOT = "mixSnapshot"
+        private const val KEY_PURE_MODE = "pureMode"
+        private const val KEY_LYRICS_ALIGNMENT = "lyricsAlignment"
+        private const val KEY_YOUR_MIX_DISMISSED = "yourMixCardDismissed"
+        private const val KEY_CONTROL_COLORS = "controlColors"
+        private const val KEY_FONT_CHOICES = "fontChoices"
+        private const val KEY_CUSTOM_FONT = "customFontVersion"
         const val PREFS_NAME = "settings"
         const val KEY_LANGUAGE = "language"
         private const val KEY_TAB_ORDER = "tabOrder"
