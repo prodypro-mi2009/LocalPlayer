@@ -6,6 +6,8 @@ Built with **Kotlin, Jetpack Compose, Material 3, Room, and Android Media3**, Lo
 
 The goal is simple: deliver a polished, lightweight music player that keeps your music and listening experience under your control.
 
+### Download here : https://github.com/prodypro-mi2009/LocalPlayer/releases/download/1.0.4/v.1.0.4.apk
+
 ## ✨ Features
 
 ### 🎵 Local Music Library
