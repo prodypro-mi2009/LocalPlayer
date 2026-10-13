@@ -5,6 +5,8 @@ Built with Kotlin, Jetpack Compose, Material 3, Room, and Android Media3, LocalP
 
 The goal is simple: deliver a polished, lightweight music player that keeps your music and listening experience under your control.
 
+#Download here: https://github.com/prodypro-mi2009/LocalPlayer/releases/download/v.1.0.5/v.1.0.5.apk
+
 ✨ Features
 🎵 Local Music Library
 Browse and play music stored on your Android device.
