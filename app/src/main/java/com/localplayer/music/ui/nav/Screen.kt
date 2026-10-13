@@ -10,6 +10,8 @@ sealed interface Screen {
     /** Lyrics of the CURRENT song (follows song changes). */
     data object Lyrics : Screen
     data class LyricsEditor(val trackId: Long) : Screen
+    /** Internet (LRCLIB) lyrics search for one song; opened only by the user's button. */
+    data class LyricsSearch(val trackId: Long) : Screen
     /** [key] is the artist group key (empty = Unknown Artist); [name] is the display name. */
     data class Artist(val key: String, val name: String) : Screen
     data class Album(val groupKey: String, val title: String) : Screen
@@ -53,6 +55,7 @@ fun Screen.encode(): String = when (this) {
     Screen.Queue -> "queue"
     Screen.Lyrics -> "lyrics"
     is Screen.LyricsEditor -> listOf("lyricseditor", trackId.toString()).joinToString(SEP)
+    is Screen.LyricsSearch -> listOf("lyricssearch", trackId.toString()).joinToString(SEP)
     is Screen.Artist -> listOf("artist", key, name).joinToString(SEP)
     is Screen.Album -> listOf("album", groupKey, title).joinToString(SEP)
     is Screen.Genre -> listOf("genre", key, name).joinToString(SEP)
@@ -86,6 +89,7 @@ fun decodeScreen(text: String): Screen {
             "queue" -> Screen.Queue
             "lyrics" -> Screen.Lyrics
             "lyricseditor" -> Screen.LyricsEditor(parts[1].toLong())
+            "lyricssearch" -> Screen.LyricsSearch(parts[1].toLong())
             "artist" -> Screen.Artist(parts[1], parts.getOrElse(2) { "" })
             "album" -> Screen.Album(parts[1], parts.getOrElse(2) { "" })
             "genre" -> Screen.Genre(parts[1], parts.getOrElse(2) { "" })

@@ -74,7 +74,10 @@ fun LyricsEditorScreen(
     )
     val state by editor.state.collectAsStateWithLifecycle()
     val playerState by library.playerState.collectAsStateWithLifecycle()
-    EditEvents(viewModel = editor, onSaved = { nav.pop() })
+    EditEvents(viewModel = editor, onSaved = {
+        library.notifyLyricsChanged()
+        nav.pop()
+    })
 
     Column(Modifier.fillMaxSize().imePadding()) {
         DetailTopBar(title = stringResource(R.string.edit_lyrics), onBack = { if (!state.saving) nav.pop() })

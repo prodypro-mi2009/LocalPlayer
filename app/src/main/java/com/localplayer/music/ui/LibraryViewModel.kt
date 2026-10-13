@@ -114,6 +114,33 @@ class LibraryViewModel(private val container: AppContainer) : ViewModel() {
         // Incremental pass when the app opens; unchanged files are skipped, so this is cheap.
         // Without the media permission the scanner simply does nothing.
         rescan()
+        autoCheckForUpdate()
+    }
+
+    /**
+     * Periodic update check: at most once a day, only when the user left it on and a repository is configured, and
+     * silent when offline. It only reads the latest release; it never downloads or installs anything by itself.
+     */
+    private fun autoCheckForUpdate() {
+        val context = container.appContext
+        val settings = container.settings
+        val repo = com.localplayer.music.data.update.AppInfo.repo(context)
+        if (!com.localplayer.music.data.update.UpdateRules.shouldAutoCheck(
+                settings.autoUpdateCheck.value, repo.isNotEmpty(), System.currentTimeMillis(), settings.lastUpdateCheckAt,
+            )
+        ) return
+        viewModelScope.launch {
+            kotlinx.coroutines.delay(8_000)        // not during app start
+            val checker = com.localplayer.music.data.update.UpdateChecker(com.localplayer.music.data.update.AppInfo.userAgent(context))
+            val result = checker.check(repo, com.localplayer.music.data.update.AppInfo.versionName(context))
+            if (result is com.localplayer.music.data.update.UpdateCheck.Offline) return@launch   // try again next launch
+            settings.lastUpdateCheckAt = System.currentTimeMillis()
+            if (result is com.localplayer.music.data.update.UpdateCheck.Newer) {
+                val already = settings.knownNewerVersion == result.release.tag
+                settings.knownNewerVersion = result.release.tag
+                if (!already) _messages.tryEmit(UiMessage(R.string.update_available_msg, listOf(result.release.tag)))
+            }
+        }
     }
 
     fun setSort(sort: SongSort) {
@@ -343,6 +370,11 @@ class LibraryViewModel(private val container: AppContainer) : ViewModel() {
         data class Loaded(val lyrics: ParsedLyrics) : LyricsLoad
         data object Failed : LyricsLoad
     }
+
+    /** Bumped whenever lyrics were written into a file, so an open Lyrics page reloads them from the file. */
+    private val _lyricsRevision = MutableStateFlow(0)
+    val lyricsRevision: StateFlow<Int> = _lyricsRevision.asStateFlow()
+    fun notifyLyricsChanged() { _lyricsRevision.value += 1 }
 
     /** Lyrics are read from the audio FILE every time (the file is the source of truth). */
     suspend fun loadLyrics(trackId: Long): LyricsLoad = try {

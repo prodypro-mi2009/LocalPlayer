@@ -103,6 +103,7 @@ import com.localplayer.music.ui.screens.GenreScreen
 import com.localplayer.music.ui.screens.HomeScreen
 import com.localplayer.music.ui.screens.LyricsEditorScreen
 import com.localplayer.music.ui.screens.LyricsScreen
+import com.localplayer.music.ui.screens.LyricsSearchScreen
 import com.localplayer.music.ui.screens.PlaylistScreen
 import com.localplayer.music.ui.screens.QueueScreen
 import com.localplayer.music.ui.screens.RecentScreen
@@ -316,6 +317,7 @@ private fun LibraryRoot(viewModel: LibraryViewModel) {
                         Screen.Queue -> QueueScreen(nav, viewModel, feedback)
                         Screen.Lyrics -> LyricsScreen(nav, viewModel, tone)
                         is Screen.LyricsEditor -> LyricsEditorScreen(screen.trackId, nav, viewModel, container)
+                        is Screen.LyricsSearch -> LyricsSearchScreen(screen.trackId, nav, viewModel, container)
                         is Screen.Artist -> ArtistScreen(screen, nav, viewModel, menu)
                         is Screen.Album -> AlbumScreen(screen, nav, viewModel, menu)
                         is Screen.Genre -> GenreScreen(screen, nav, viewModel, menu)
@@ -333,7 +335,7 @@ private fun LibraryRoot(viewModel: LibraryViewModel) {
                         Screen.SettingsLibrary -> LibrarySettingsScreen(nav, viewModel)
                         Screen.SettingsLyrics -> LyricsSettingsScreen(nav, viewModel)
                         Screen.SettingsYourMix -> YourMixSettingsScreen(nav, viewModel)
-                        Screen.SettingsAbout -> AboutSettingsScreen(nav)
+                        Screen.SettingsAbout -> AboutSettingsScreen(nav, container)
                         Screen.YourMix -> YourMixScreen(nav, viewModel, menu)
                         Screen.TimeUsage -> TimeUsageScreen(nav, viewModel)
                         Screen.Top20 -> Top20Screen(nav, viewModel)

@@ -3,6 +3,7 @@ package com.localplayer.music.ui.screens
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ColumnScope
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
@@ -18,6 +19,7 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
@@ -35,6 +37,8 @@ import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import androidx.lifecycle.viewmodel.initializer
+import androidx.lifecycle.viewmodel.viewModelFactory
 import com.localplayer.music.LocalPlayerApp
 import com.localplayer.music.R
 import com.localplayer.music.data.AppLanguage
@@ -459,20 +463,151 @@ private fun MixSlider(label: String, value: Float, range: ClosedFloatingPointRan
 // ------------------------------------------------------------------ About
 
 @Composable
-fun AboutSettingsScreen(nav: NavState) {
+fun AboutSettingsScreen(nav: NavState, container: com.localplayer.music.AppContainer) {
     val context = LocalContext.current
-    val version = remember(context) {
-        try {
-            context.packageManager.getPackageInfo(context.packageName, 0).versionName.orEmpty()
-        } catch (e: Exception) {
-            ""
-        }
-    }
+    val update: com.localplayer.music.ui.UpdateViewModel = androidx.lifecycle.viewmodel.compose.viewModel(
+        key = "about-update",
+        factory = viewModelFactory {
+            initializer { com.localplayer.music.ui.UpdateViewModel(container) }
+        },
+    )
+    val ui by update.state.collectAsStateWithLifecycle()
+    val auto by container.settings.autoUpdateCheck.collectAsStateWithLifecycle()
+    val version = remember(context) { com.localplayer.music.data.update.AppInfo.versionName(context) }
+    val repoUrl = remember(context) { com.localplayer.music.data.update.AppInfo.repoUrl(context) }
+    val known = remember { update.knownNewer() }
+
     SettingsPage(R.string.settings_about, nav) {
         Text(
             stringResource(R.string.version_label, version),
             style = MaterialTheme.typography.bodyMedium,
             modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp),
         )
+        if (repoUrl != null) {
+            NavRow(
+                title = stringResource(R.string.about_github),
+                subtitle = repoUrl.removePrefix("https://"),
+                onClick = { openWebPage(context, repoUrl) },
+            )
+        } else {
+            Text(
+                stringResource(R.string.about_github_unset),
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp),
+            )
+        }
+
+        Row(
+            Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Column(Modifier.weight(1f)) {
+                Text(stringResource(R.string.update_auto), style = MaterialTheme.typography.bodyLarge)
+                Text(
+                    stringResource(R.string.update_auto_note),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+            Switch(checked = auto, onCheckedChange = { container.settings.setAutoUpdateCheck(it) })
+        }
+
+        Column(Modifier.padding(horizontal = 16.dp, vertical = 8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            val busy = ui is com.localplayer.music.ui.UpdateUi.Checking || ui is com.localplayer.music.ui.UpdateUi.Downloading
+            Button(onClick = update::check, enabled = !busy && repoUrl != null) {
+                Text(stringResource(R.string.update_check))
+            }
+            if (known != null && ui is com.localplayer.music.ui.UpdateUi.Idle) {
+                Text(stringResource(R.string.update_known, known), style = MaterialTheme.typography.bodyMedium)
+            }
+            UpdateStatus(ui, update, context)
+        }
+    }
+}
+
+@Composable
+private fun UpdateStatus(
+    ui: com.localplayer.music.ui.UpdateUi,
+    update: com.localplayer.music.ui.UpdateViewModel,
+    context: android.content.Context,
+) {
+    val err = MaterialTheme.colorScheme.error
+    when (ui) {
+        com.localplayer.music.ui.UpdateUi.Idle -> Unit
+        com.localplayer.music.ui.UpdateUi.Checking -> Text(stringResource(R.string.update_checking))
+        is com.localplayer.music.ui.UpdateUi.UpToDate -> Text(stringResource(R.string.update_up_to_date, ui.latest))
+        com.localplayer.music.ui.UpdateUi.NotConfigured -> Text(stringResource(R.string.about_github_unset), color = err)
+        com.localplayer.music.ui.UpdateUi.NoRelease -> Text(stringResource(R.string.update_no_release))
+        com.localplayer.music.ui.UpdateUi.Offline -> Text(stringResource(R.string.update_offline), color = err)
+        com.localplayer.music.ui.UpdateUi.RateLimited -> Text(stringResource(R.string.update_rate_limited), color = err)
+        is com.localplayer.music.ui.UpdateUi.Failed -> Text(stringResource(R.string.update_failed, ui.code.toString()), color = err)
+        is com.localplayer.music.ui.UpdateUi.Available -> {
+            val r = ui.release
+            Text(stringResource(R.string.update_available, r.tag), style = MaterialTheme.typography.titleMedium)
+            if (r.title.isNotBlank() && r.title != r.tag) Text(r.title, style = MaterialTheme.typography.bodyMedium)
+            if (r.notes.isNotBlank()) {
+                Text(stringResource(R.string.update_notes), style = MaterialTheme.typography.labelLarge)
+                Text(
+                    r.notes.take(4000),
+                    style = MaterialTheme.typography.bodySmall,
+                    modifier = Modifier.heightIn(max = 260.dp).verticalScroll(rememberScrollState()),
+                )
+            }
+            if (r.apkUrl != null) {
+                Button(onClick = { update.download(r) }) { Text(stringResource(R.string.update_download)) }
+                Text(stringResource(R.string.update_install_note), style = MaterialTheme.typography.bodySmall)
+            } else {
+                Text(stringResource(R.string.update_no_apk), color = err)
+            }
+        }
+        is com.localplayer.music.ui.UpdateUi.Downloading -> {
+            Text(stringResource(R.string.update_downloading, ui.release.tag))
+            androidx.compose.material3.LinearProgressIndicator(progress = { ui.progress }, modifier = Modifier.fillMaxWidth())
+        }
+        is com.localplayer.music.ui.UpdateUi.Downloaded -> {
+            Text(stringResource(R.string.update_downloaded, ui.release.tag))
+            Button(onClick = { installApk(context, ui.file) }) { Text(stringResource(R.string.update_install)) }
+            Text(stringResource(R.string.update_install_note), style = MaterialTheme.typography.bodySmall)
+        }
+        is com.localplayer.music.ui.UpdateUi.DownloadFailed -> {
+            Text(stringResource(if (ui.corrupt) R.string.update_corrupt else R.string.update_download_failed), color = err)
+            OutlinedButton(onClick = { update.backToAvailable(ui.release) }) { Text(stringResource(R.string.ls_retry)) }
+        }
+    }
+}
+
+private fun openWebPage(context: android.content.Context, url: String) {
+    try {
+        context.startActivity(android.content.Intent(android.content.Intent.ACTION_VIEW, android.net.Uri.parse(url)))
+    } catch (e: Exception) {
+        android.widget.Toast.makeText(context, url, android.widget.Toast.LENGTH_LONG).show()
+    }
+}
+
+/**
+ * Hands the downloaded APK to Android's package installer, which shows its own confirmation. When this app is not yet
+ * allowed to install packages, Android's "install unknown apps" page for THIS app opens first; after allowing, press
+ * Install again. Nothing is installed without the user's confirmation, and the system only accepts an APK signed
+ * with the same key as the installed app.
+ */
+private fun installApk(context: android.content.Context, file: java.io.File) {
+    try {
+        if (!context.packageManager.canRequestPackageInstalls()) {
+            context.startActivity(
+                android.content.Intent(
+                    android.provider.Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES,
+                    android.net.Uri.parse("package:${context.packageName}"),
+                ),
+            )
+            return
+        }
+        val uri = androidx.core.content.FileProvider.getUriForFile(context, "${context.packageName}.updates", file)
+        val intent = android.content.Intent(android.content.Intent.ACTION_VIEW)
+            .setDataAndType(uri, "application/vnd.android.package-archive")
+            .addFlags(android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION)
+        context.startActivity(intent)
+    } catch (e: Exception) {
+        android.widget.Toast.makeText(context, R.string.update_install_failed, android.widget.Toast.LENGTH_LONG).show()
     }
 }

@@ -24,9 +24,13 @@
     <uses-permission android:name="android.permission.READ_MEDIA_VISUAL_USER_SELECTED" tools:node="remove" />
     <uses-permission android:name="android.permission.ACCESS_MEDIA_LOCATION" tools:node="remove" />
 
-    <!-- Hard guarantee: no network permissions, even if a library ever tries to add them. -->
-    <uses-permission android:name="android.permission.INTERNET" tools:node="remove" />
+    <!-- Internet is used ONLY for two things the user starts or allows: LRCLIB lyrics search (button press) and the
+         update check / APK download from the project's GitHub Releases. The library, statistics and everything else
+         stay local; there is no analytics, ads or tracking. Network state is never read. -->
+    <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" tools:node="remove" />
+    <!-- Lets the user open the downloaded release APK in Android's own installer (which asks for confirmation). -->
+    <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
 
     <application
         android:name=".LocalPlayerApp"
@@ -47,6 +51,17 @@
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
         </activity>
+
+        <!-- Shares the downloaded update APK (cache/updates only) with Android's package installer. -->
+        <provider
+            android:name="androidx.core.content.FileProvider"
+            android:authorities="${applicationId}.updates"
+            android:exported="false"
+            android:grantUriPermissions="true">
+            <meta-data
+                android:name="android.support.FILE_PROVIDER_PATHS"
+                android:resource="@xml/update_paths" />
+        </provider>
 
         <service
             android:name=".playback.PlaybackService"

@@ -9,6 +9,8 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.LocalContentColor
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.getValue
@@ -34,6 +36,7 @@ import com.localplayer.music.ui.components.SyncedLyricsList
 import com.localplayer.music.ui.components.rememberActiveLyricIndex
 import com.localplayer.music.ui.components.rememberBlurredArtwork
 import com.localplayer.music.ui.nav.NavState
+import com.localplayer.music.ui.nav.Screen
 import com.localplayer.music.ui.theme.ArtworkGradient
 import com.localplayer.music.ui.theme.ForceStatusBarIcons
 import com.localplayer.music.ui.theme.LocalPureMode
@@ -61,6 +64,13 @@ fun LyricsScreen(nav: NavState, viewModel: LibraryViewModel, tone: Color?) {
         label = "lyricsTint",
     )
     val pure = LocalPureMode.current.isOn
+    // The lyrics are read from the audio FILE; they reload after a save (editor or Internet search).
+    val revision by viewModel.lyricsRevision.collectAsStateWithLifecycle()
+    val trackId = now?.mediaId?.toLongOrNull()
+    val load by produceState<LyricsLoad?>(initialValue = null, trackId, revision) {
+        value = null
+        value = trackId?.let { viewModel.loadLyrics(it) } ?: LyricsLoad.None
+    }
     // Pure black / white: the page is the plain theme background with theme text (no artwork, no tint, no scrim).
     if (!pure) ForceStatusBarIcons(lightIcons = true)
 
@@ -72,12 +82,23 @@ fun LyricsScreen(nav: NavState, viewModel: LibraryViewModel, tone: Color?) {
         }
         CompositionLocalProvider(LocalContentColor provides (if (pure) MaterialTheme.colorScheme.onBackground else Color.White)) {
             Column(Modifier.fillMaxSize()) {
-                DetailTopBar(title = now?.title ?: stringResource(R.string.lyrics), onBack = { nav.pop() })
+                DetailTopBar(
+                    title = now?.title ?: stringResource(R.string.lyrics),
+                    onBack = { nav.pop() },
+                    actions = {
+                        // Only when the file has no lyrics: the search never starts by itself, only from this button.
+                        if (trackId != null && load == LyricsLoad.None) {
+                            TextButton(onClick = { nav.push(Screen.LyricsSearch(trackId)) }) {
+                                Text(stringResource(R.string.internet_search))
+                            }
+                        }
+                    },
+                )
                 if (now == null) {
                     EmptyState(stringResource(R.string.queue_empty))
                 } else {
                     // Everything below belongs to ONE song; a new song rebuilds it from scratch.
-                    key(now.mediaId) { LyricsBody(viewModel, now.mediaId.toLongOrNull(), state.isPlaying) }
+                    key(now.mediaId) { LyricsBody(viewModel, load, state.isPlaying) }
                 }
             }
         }
@@ -85,12 +106,9 @@ fun LyricsScreen(nav: NavState, viewModel: LibraryViewModel, tone: Color?) {
 }
 
 @Composable
-private fun LyricsBody(viewModel: LibraryViewModel, trackId: Long?, isPlaying: Boolean) {
+private fun LyricsBody(viewModel: LibraryViewModel, load: LyricsLoad?, isPlaying: Boolean) {
     val alignment by viewModel.settings.lyricsAlignment.collectAsStateWithLifecycle()
     val textAlign = alignment.toTextAlign()
-    val load by produceState<LyricsLoad?>(initialValue = null, trackId) {
-        value = trackId?.let { viewModel.loadLyrics(it) } ?: LyricsLoad.None
-    }
     when (val result = load) {
         null -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { CircularProgressIndicator() }
         LyricsLoad.None -> EmptyState(stringResource(R.string.no_lyrics))

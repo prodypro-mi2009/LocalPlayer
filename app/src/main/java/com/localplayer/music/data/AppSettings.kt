@@ -165,7 +165,28 @@ class AppSettings(context: Context) {
             prefs.edit().apply { if (value == null) remove(KEY_MIX_SNAPSHOT) else putString(KEY_MIX_SNAPSHOT, value.serialize()) }.apply()
         }
 
+    private val _autoUpdateCheck = MutableStateFlow(prefs.getBoolean(KEY_AUTO_UPDATE, true))
+    /** Check GitHub Releases for a newer version at most once a day after the app opens. */
+    val autoUpdateCheck: StateFlow<Boolean> = _autoUpdateCheck.asStateFlow()
+
+    fun setAutoUpdateCheck(value: Boolean) {
+        prefs.edit().putBoolean(KEY_AUTO_UPDATE, value).apply()
+        _autoUpdateCheck.value = value
+    }
+
+    var lastUpdateCheckAt: Long
+        get() = prefs.getLong(KEY_LAST_UPDATE_CHECK, 0L)
+        set(value) { prefs.edit().putLong(KEY_LAST_UPDATE_CHECK, value).apply() }
+
+    /** The newest version an automatic check found (empty = none), shown in About. */
+    var knownNewerVersion: String
+        get() = prefs.getString(KEY_KNOWN_NEWER, "").orEmpty()
+        set(value) { prefs.edit().putString(KEY_KNOWN_NEWER, value).apply() }
+
     companion object {
+        private const val KEY_AUTO_UPDATE = "autoUpdateCheck"
+        private const val KEY_LAST_UPDATE_CHECK = "lastUpdateCheckAt"
+        private const val KEY_KNOWN_NEWER = "knownNewerVersion"
         private const val KEY_MIX_SETTINGS = "mixSettings"
         private const val KEY_MIX_SNAPSHOT = "mixSnapshot"
         private const val KEY_PURE_MODE = "pureMode"
