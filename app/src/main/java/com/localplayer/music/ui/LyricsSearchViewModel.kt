@@ -61,13 +61,14 @@ class LyricsSearchViewModel(private val container: AppContainer, private val tra
     val state: StateFlow<LyricsSearchState> = _state.asStateFlow()
     private var job: Job? = null
 
-    init {
-        search()
-    }
-
+    /**
+     * Starts a fresh search that reads the track from the library again. The screen calls this EVERY time it is
+     * opened (and the retry button calls it too): this ViewModel is cached per track by the activity, so a search
+     * started only once in `init` would show the title, results or error of the previous visit.
+     */
     fun search() {
         job?.cancel()
-        _state.update { it.copy(phase = LyricsSearchPhase.Loading, selected = 0) }
+        _state.update { LyricsSearchState(preferSynced = it.preferSynced) }
         job = viewModelScope.launch {
             val track = container.library.trackItem(trackId)
             if (track == null) {
@@ -91,6 +92,11 @@ class LyricsSearchViewModel(private val container: AppContainer, private val tra
             }
             _state.update { it.copy(phase = phase) }
         }
+    }
+
+    /** The screen left the composition: stop the request instead of finishing it in the background. */
+    fun cancel() {
+        job?.cancel()
     }
 
     fun select(index: Int) = _state.update { it.copy(selected = index) }

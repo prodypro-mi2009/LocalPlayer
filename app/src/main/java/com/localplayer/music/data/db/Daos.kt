@@ -108,6 +108,7 @@ data class PlaylistRow(
     val folderSyncAdded: Int = 0,
     val folderSyncRemoved: Int = 0,
     val folderSyncStatus: Int = 0,
+    val coverFile: String? = null,
 )
 
 @Dao
@@ -320,6 +321,9 @@ interface PlaylistDao {
     @Query("UPDATE playlists SET name = :name, updatedAt = :now WHERE id = :id")
     suspend fun rename(id: Long, name: String, now: Long)
 
+    @Query("UPDATE playlists SET coverFile = :file, updatedAt = :now WHERE id = :id")
+    suspend fun setCover(id: Long, file: String?, now: Long)
+
     @Query("UPDATE playlists SET updatedAt = :now WHERE id = :id")
     suspend fun touch(id: Long, now: Long)
 
@@ -358,7 +362,7 @@ interface PlaylistDao {
             "p.sourceFolderKey AS sourceFolderKey, p.sourceFolderLabel AS sourceFolderLabel, " +
             "p.sourceIncludesSubfolders AS sourceIncludesSubfolders, p.folderSyncedAt AS folderSyncedAt, " +
             "p.folderSyncAdded AS folderSyncAdded, p.folderSyncRemoved AS folderSyncRemoved, " +
-            "p.folderSyncStatus AS folderSyncStatus " +
+            "p.folderSyncStatus AS folderSyncStatus, p.coverFile AS coverFile " +
             "FROM playlists p LEFT JOIN playlist_tracks pt ON pt.playlistId = p.id " +
             "LEFT JOIN tracks t ON t.uri = pt.trackUri AND $VISIBLE_T " +
             "GROUP BY p.id ORDER BY p.name COLLATE NOCASE",
@@ -370,7 +374,7 @@ interface PlaylistDao {
             "p.sourceFolderKey AS sourceFolderKey, p.sourceFolderLabel AS sourceFolderLabel, " +
             "p.sourceIncludesSubfolders AS sourceIncludesSubfolders, p.folderSyncedAt AS folderSyncedAt, " +
             "p.folderSyncAdded AS folderSyncAdded, p.folderSyncRemoved AS folderSyncRemoved, " +
-            "p.folderSyncStatus AS folderSyncStatus " +
+            "p.folderSyncStatus AS folderSyncStatus, p.coverFile AS coverFile " +
             "FROM playlists p LEFT JOIN playlist_tracks pt ON pt.playlistId = p.id " +
             "LEFT JOIN tracks t ON t.uri = pt.trackUri AND $VISIBLE_T " +
             "WHERE p.id = :id GROUP BY p.id",
@@ -382,6 +386,13 @@ interface PlaylistDao {
             "WHERE pt.playlistId = :id AND $VISIBLE_T ORDER BY pt.position",
     )
     fun observeTracks(id: Long): Flow<List<TrackListItem>>
+
+    /** Every visible song of the given playlists in ONE query (a song in several playlists appears once). */
+    @Query(
+        "SELECT DISTINCT $TRACK_COLS_T FROM playlist_tracks pt JOIN tracks t ON t.uri = pt.trackUri " +
+            "WHERE pt.playlistId IN (:ids) AND $VISIBLE_T",
+    )
+    suspend fun tracksOfPlaylists(ids: List<Long>): List<TrackListItem>
 
     @Query(
         "SELECT t.id AS trackId, t.uri AS uri, t.lastModified AS lastModified FROM playlist_tracks pt " +

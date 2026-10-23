@@ -12,16 +12,24 @@ import androidx.compose.material3.SwipeToDismissBox
 import androidx.compose.material3.SwipeToDismissBoxValue
 import androidx.compose.material3.rememberSwipeToDismissBoxState
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.rememberUpdatedState
+import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import com.localplayer.music.R
+import com.localplayer.music.ui.theme.rememberHaptics
 
 /** Fraction of the row width that has to be swiped before the action fires. Easy to tune. */
-const val SWIPE_TO_QUEUE_THRESHOLD = 0.4f
+const val SWIPE_TO_QUEUE_THRESHOLD = 0.7f
+
+/** How the song rows behave: swipe gestures on/off, and the optional "add to queue" button (used when swipe is off). */
+data class RowGestures(val swipe: Boolean = true, val queueButton: Boolean = false)
+
+val LocalRowGestures = androidx.compose.runtime.compositionLocalOf { RowGestures() }
 
 /**
  * Two-way queue gesture used by every track row:
@@ -62,6 +70,11 @@ fun SwipeToQueue(
         },
         positionalThreshold = { distance -> distance * threshold },
     )
+    // One haptic tick when the swipe crosses the commit point (the target flips away from Settled).
+    val haptics = rememberHaptics()
+    LaunchedEffect(state) {
+        snapshotFlow { state.targetValue }.collect { if (it != SwipeToDismissBoxValue.Settled) haptics.threshold() }
+    }
     SwipeToDismissBox(
         state = state,
         modifier = modifier,

@@ -20,7 +20,7 @@ class QueueInteractionTest {
 
         fun insertNext(track: String): String {
             val id = QueueOccurrence.newId()
-            val at = PlayNextOrder.insertIndex(current, items.size) { items[it].playNext }
+            val at = PlayNextOrder.insertIndex(current, items.size)
             items.add(at, Entry(track, id, playNext = true))
             if (at <= current) current++ // never happens for insertNext, kept to mirror Media3's index shift
             return id
@@ -65,11 +65,12 @@ class QueueInteractionTest {
         assertEquals(playing, q.currentEntry())
     }
 
-    @Test fun twoSwipesRightKeepTheirOrder() {
+    @Test fun twoSwipesRightPlayTheNewestFirst() {
+        // E queued with Play next, then Z before the current song advances: Z plays before E.
         val q = queue("A", "B", current = 0)
-        q.insertNext("X")
-        q.insertNext("Y")
-        assertEquals(listOf("A", "X", "Y", "B"), q.items.map { it.track })
+        q.insertNext("E")
+        q.insertNext("Z")
+        assertEquals(listOf("A", "Z", "E", "B"), q.items.map { it.track })
     }
 
     @Test fun swipeLeftAppendsAtTheEnd() {

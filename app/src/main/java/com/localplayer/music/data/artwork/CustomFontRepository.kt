@@ -53,6 +53,23 @@ class CustomFontRepository(private val context: Context, private val settings: A
         }
     }
 
+    /** The imported font file for a backup, or null. */
+    fun fileForBackup(): File? = file.takeIf { exists() }
+
+    /** Restores a font from a verified backup file; it must load as a font. Returns false and changes nothing otherwise. */
+    suspend fun restoreFrom(source: File): Boolean = withContext(Dispatchers.IO) {
+        try {
+            if (source.length() == 0L || source.length() > MAX_BYTES || Typeface.Builder(source).build() == null) return@withContext false
+            val temp = File(file.path + ".tmp")
+            source.copyTo(temp, overwrite = true)
+            if (!temp.renameTo(file)) { temp.delete(); return@withContext false }
+            settings.setCustomFontVersion(System.currentTimeMillis())
+            true
+        } catch (e: Exception) {
+            false
+        }
+    }
+
     fun remove() {
         file.delete()
         settings.setCustomFontVersion(0L)

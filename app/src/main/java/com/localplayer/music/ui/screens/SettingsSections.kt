@@ -22,6 +22,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Switch
+import androidx.compose.ui.draw.alpha
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -31,14 +32,15 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
-import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.initializer
 import androidx.lifecycle.viewmodel.viewModelFactory
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.localplayer.music.LocalPlayerApp
 import com.localplayer.music.R
 import com.localplayer.music.data.AppLanguage
@@ -64,7 +66,7 @@ import com.localplayer.music.ui.theme.AppFonts
 
 /** Shared frame of every settings sub-screen: back arrow + title + scrolling content with room for the bottom bars. */
 @Composable
-private fun SettingsPage(title: Int, nav: NavState, content: @Composable ColumnScope.() -> Unit) {
+internal fun SettingsPage(title: Int, nav: NavState, content: @Composable ColumnScope.() -> Unit) {
     Column(Modifier.fillMaxSize()) {
         DetailTopBar(title = stringResource(title), onBack = { nav.pop() })
         Column(Modifier.verticalScroll(rememberScrollState())) {
@@ -102,12 +104,23 @@ private fun RadioLine(label: String, selected: Boolean, enabled: Boolean = true,
 
 // ------------------------------------------------------------------ Appearance
 
-/** Appearance: theme, then the colour settings and the font settings (each opens its own screen from here). */
+/** Appearance hub: theme, colours and fonts (each is its own page). */
 @Composable
-fun AppearanceSettingsScreen(nav: NavState, viewModel: LibraryViewModel) {
+fun AppearanceSettingsScreen(nav: NavState, @Suppress("UNUSED_PARAMETER") viewModel: LibraryViewModel) = SettingsHub(
+    R.string.settings_appearance, nav,
+    listOf(
+        SettingsEntry(R.string.settings_theme, R.string.settings_card_theme, AppIcons.Brightness, Color(0xFFB0722A)) { nav.push(Screen.SettingsTheme) },
+        SettingsEntry(R.string.settings_colors, R.string.settings_colors_summary, AppIcons.Palette, Color(0xFF8A4F6B)) { nav.push(Screen.Colors) },
+        SettingsEntry(R.string.settings_fonts, R.string.settings_fonts_summary, AppIcons.TextFields, Color(0xFF3F7A7A)) { nav.push(Screen.Fonts) },
+    ),
+)
+
+/** Appearance > Theme: light, dark or follow the system. */
+@Composable
+fun ThemeSettingsScreen(nav: NavState, viewModel: LibraryViewModel) {
     val themeMode by viewModel.settings.themeMode.collectAsStateWithLifecycle()
     val pure by viewModel.settings.pureMode.collectAsStateWithLifecycle()
-    SettingsPage(R.string.settings_appearance, nav) {
+    SettingsPage(R.string.settings_theme, nav) {
         Column(Modifier.padding(horizontal = 16.dp, vertical = 8.dp)) {
             Text(stringResource(R.string.settings_theme), style = MaterialTheme.typography.bodyLarge)
             ThemeMode.entries.forEach { mode ->
@@ -131,16 +144,6 @@ fun AppearanceSettingsScreen(nav: NavState, viewModel: LibraryViewModel) {
                 )
             }
         }
-        NavRow(
-            title = stringResource(R.string.settings_colors),
-            subtitle = stringResource(R.string.settings_colors_summary),
-            onClick = { nav.push(Screen.Colors) },
-        )
-        NavRow(
-            title = stringResource(R.string.settings_fonts),
-            subtitle = stringResource(R.string.settings_fonts_summary),
-            onClick = { nav.push(Screen.Fonts) },
-        )
     }
 }
 
@@ -169,16 +172,22 @@ fun LanguageSettingsScreen(nav: NavState, viewModel: LibraryViewModel) {
 // ------------------------------------------------------------------ Library
 
 @Composable
-fun LibrarySettingsScreen(nav: NavState, viewModel: LibraryViewModel) {
+fun LibrarySettingsScreen(nav: NavState, viewModel: LibraryViewModel) = SettingsHub(
+    R.string.settings_library, nav,
+    listOf(
+        SettingsEntry(R.string.settings_scan, R.string.settings_card_scan, AppIcons.Refresh, Color(0xFF0B5C80)) { nav.push(Screen.SettingsScan) },
+        SettingsEntry(R.string.library_folders, R.string.library_folders_summary, AppIcons.Folder, Color(0xFF2F6B4A)) { nav.push(Screen.LibraryFolders) },
+        SettingsEntry(R.string.hidden_songs, R.string.settings_card_hidden, AppIcons.VisibilityOff, Color(0xFF5E4B7A)) { nav.push(Screen.HiddenSongs) },
+    ),
+)
+
+/** Library > Scanning: how many songs were found, rescan, and the scanner type. */
+@Composable
+fun ScanSettingsScreen(nav: NavState, viewModel: LibraryViewModel) {
     val scan by viewModel.scanState.collectAsStateWithLifecycle()
     val songs by viewModel.songs.collectAsStateWithLifecycle()
-    val settings = viewModel.settings
-    val fastScanner by settings.useMediaStoreScanner.collectAsStateWithLifecycle()
-    val tabOrderRaw by settings.tabOrder.collectAsStateWithLifecycle()
-    val tabOrder = remember(tabOrderRaw) { TabOrder.parse(tabOrderRaw) }
-    val hiddenCount by viewModel.hiddenCount.collectAsStateWithLifecycle()
-
-    SettingsPage(R.string.settings_library, nav) {
+    val fastScanner by viewModel.settings.useMediaStoreScanner.collectAsStateWithLifecycle()
+    SettingsPage(R.string.settings_scan, nav) {
         Column(Modifier.padding(horizontal = 16.dp)) {
             songs?.let {
                 Text(stringResource(R.string.songs_in_library, it.size), style = MaterialTheme.typography.bodyMedium)
@@ -204,17 +213,6 @@ fun LibrarySettingsScreen(nav: NavState, viewModel: LibraryViewModel) {
                 modifier = Modifier.padding(top = 4.dp),
             )
         }
-        NavRow(
-            title = stringResource(R.string.library_folders),
-            subtitle = stringResource(R.string.library_folders_summary),
-            onClick = { nav.push(Screen.LibraryFolders) },
-        )
-        NavRow(
-            title = stringResource(R.string.hidden_songs),
-            subtitle = stringResource(R.string.hidden_songs_count, hiddenCount),
-            onClick = { nav.push(Screen.HiddenSongs) },
-        )
-
         // Scanner choice: OFF = normal scanner, ON = MediaStore-only fast scanner (Android 11+).
         val supported = AppSettings.mediaStoreScannerSupported()
         Row(
@@ -243,6 +241,15 @@ fun LibrarySettingsScreen(nav: NavState, viewModel: LibraryViewModel) {
             )
         }
 
+    }
+}
+
+/** Navigation > Tab order. */
+@Composable
+fun TabOrderSettingsScreen(nav: NavState, viewModel: LibraryViewModel) {
+    val tabOrderRaw by viewModel.settings.tabOrder.collectAsStateWithLifecycle()
+    val tabOrder = remember(tabOrderRaw) { TabOrder.parse(tabOrderRaw) }
+    SettingsPage(R.string.settings_tab_order, nav) {
         // Tab order: saved at once, drives the bottom navigation (Search stays fixed on the left).
         SectionHeader(stringResource(R.string.settings_tab_order))
         Column(Modifier.padding(horizontal = 16.dp)) {
@@ -269,6 +276,24 @@ fun LibrarySettingsScreen(nav: NavState, viewModel: LibraryViewModel) {
             TextButton(onClick = viewModel::resetTabOrder, enabled = tabOrderRaw != null) {
                 Text(stringResource(R.string.settings_tab_order_reset))
             }
+        }
+
+    }
+}
+
+/** Navigation > Song gestures. */
+@Composable
+fun GesturesSettingsScreen(nav: NavState, viewModel: LibraryViewModel) {
+    SettingsPage(R.string.settings_gestures, nav) {
+        // Song-row gestures. With swipe off the gesture does nothing; the queue button is the alternative.
+        val swipeOn by viewModel.settings.swipeActionsEnabled.collectAsStateWithLifecycle()
+        val queueButtonOn by viewModel.settings.queueButtonEnabled.collectAsStateWithLifecycle()
+        SectionHeader(stringResource(R.string.settings_gestures))
+        GestureSwitchRow(R.string.settings_swipe_actions, R.string.settings_swipe_actions_note, swipeOn, true) {
+            viewModel.settings.setSwipeActionsEnabled(it)
+        }
+        GestureSwitchRow(R.string.settings_queue_button, R.string.settings_queue_button_note, queueButtonOn && !swipeOn, !swipeOn) {
+            viewModel.settings.setQueueButtonEnabled(it)
         }
     }
 }
@@ -344,12 +369,21 @@ fun LyricsAlignment.toTextAlign(): TextAlign = when (this) {
 
 // ------------------------------------------------------------------ Your Mix
 
-/** Your Mix: how the Mix is built (strategy and its options) and whether the card shows on Home. */
+/** Your Mix hub: general, how the Mix is built, and the options. */
 @Composable
-fun YourMixSettingsScreen(nav: NavState, viewModel: LibraryViewModel) {
+fun YourMixSettingsScreen(nav: NavState, @Suppress("UNUSED_PARAMETER") viewModel: LibraryViewModel) = SettingsHub(
+    R.string.settings_your_mix, nav,
+    listOf(
+        SettingsEntry(R.string.settings_mix_general, R.string.settings_card_mix_general, AppIcons.Dashboard, Color(0xFF7A3E5A)) { nav.push(Screen.SettingsMixGeneral) },
+        SettingsEntry(R.string.mix_strategy_title, R.string.settings_card_mix_strategy, AppIcons.Shuffle, Color(0xFF9A4A3A)) { nav.push(Screen.SettingsMixStrategy) },
+        SettingsEntry(R.string.mix_options_title, R.string.settings_card_mix_options, AppIcons.Tune, Color(0xFF3A5A9A)) { nav.push(Screen.SettingsMixOptions) },
+    ),
+)
+
+@Composable
+fun MixGeneralSettingsScreen(nav: NavState, viewModel: LibraryViewModel) {
     val dismissed by viewModel.settings.yourMixCardDismissed.collectAsStateWithLifecycle()
-    val mix by viewModel.settings.mixSettings.collectAsStateWithLifecycle()
-    SettingsPage(R.string.settings_your_mix, nav) {
+    SettingsPage(R.string.settings_mix_general, nav) {
         Row(
             Modifier.fillMaxWidth().heightIn(min = 56.dp).padding(horizontal = 16.dp, vertical = 8.dp),
             verticalAlignment = Alignment.CenterVertically,
@@ -370,6 +404,13 @@ fun YourMixSettingsScreen(nav: NavState, viewModel: LibraryViewModel) {
             onClick = { nav.push(Screen.YourMix) },
         )
 
+    }
+}
+
+@Composable
+fun MixStrategySettingsScreen(nav: NavState, viewModel: LibraryViewModel) {
+    val mix by viewModel.settings.mixSettings.collectAsStateWithLifecycle()
+    SettingsPage(R.string.mix_strategy_title, nav) {
         SectionHeader(stringResource(R.string.mix_strategy_title))
         Column(Modifier.padding(horizontal = 16.dp)) {
             MixStrategy.entries.forEach { option ->
@@ -394,6 +435,13 @@ fun YourMixSettingsScreen(nav: NavState, viewModel: LibraryViewModel) {
             }
         }
 
+    }
+}
+
+@Composable
+fun MixOptionsSettingsScreen(nav: NavState, viewModel: LibraryViewModel) {
+    val mix by viewModel.settings.mixSettings.collectAsStateWithLifecycle()
+    SettingsPage(R.string.mix_options_title, nav) {
         SectionHeader(stringResource(R.string.mix_options_title))
         Column(Modifier.padding(horizontal = 16.dp)) {
             MixSlider(
@@ -545,6 +593,10 @@ private fun UpdateStatus(
         is com.localplayer.music.ui.UpdateUi.Available -> {
             val r = ui.release
             Text(stringResource(R.string.update_available, r.tag), style = MaterialTheme.typography.titleMedium)
+            Text(
+                stringResource(R.string.update_installed, com.localplayer.music.data.update.AppInfo.versionName(context)),
+                style = MaterialTheme.typography.bodySmall,
+            )
             if (r.title.isNotBlank() && r.title != r.tag) Text(r.title, style = MaterialTheme.typography.bodyMedium)
             if (r.notes.isNotBlank()) {
                 Text(stringResource(R.string.update_notes), style = MaterialTheme.typography.labelLarge)
@@ -560,6 +612,7 @@ private fun UpdateStatus(
             } else {
                 Text(stringResource(R.string.update_no_apk), color = err)
             }
+            OutlinedButton(onClick = { openWebPage(context, r.pageUrl) }) { Text(stringResource(R.string.update_open_page)) }
         }
         is com.localplayer.music.ui.UpdateUi.Downloading -> {
             Text(stringResource(R.string.update_downloading, ui.release.tag))
@@ -609,5 +662,26 @@ private fun installApk(context: android.content.Context, file: java.io.File) {
         context.startActivity(intent)
     } catch (e: Exception) {
         android.widget.Toast.makeText(context, R.string.update_install_failed, android.widget.Toast.LENGTH_LONG).show()
+    }
+}
+
+/** A titled switch with a note; [enabled] = false greys it out (it cannot be changed). */
+@Composable
+private fun GestureSwitchRow(title: Int, note: Int, checked: Boolean, enabled: Boolean, onChange: (Boolean) -> Unit) {
+    Row(
+        modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 10.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        val dim = if (enabled) 1f else 0.5f
+        Column(Modifier.weight(1f)) {
+            Text(stringResource(title), style = MaterialTheme.typography.bodyLarge, modifier = Modifier.alpha(dim))
+            Text(
+                stringResource(note),
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.alpha(dim),
+            )
+        }
+        Switch(checked = checked, onCheckedChange = onChange, enabled = enabled)
     }
 }

@@ -102,7 +102,11 @@ fun TrackRow(
     val unknownArtist = stringResource(R.string.unknown_artist)
     val unknownAlbum = stringResource(R.string.unknown_album)
     val playLabel = stringResource(R.string.play)
-    SwipeToQueue(onSwipeToEnd = actions.onSwipeToQueue, onSwipeToNext = actions.onSwipeToPlayNext) {
+    val gestures = LocalRowGestures.current
+    SwipeToQueue(
+        onSwipeToEnd = actions.onSwipeToQueue.takeIf { gestures.swipe },
+        onSwipeToNext = actions.onSwipeToPlayNext.takeIf { gestures.swipe },
+    ) {
     Row(
         modifier = modifier
             .fillMaxWidth()
@@ -166,6 +170,11 @@ fun TrackRow(
                 Icon(AppIcons.Close, contentDescription = actions.removeLabel ?: stringResource(R.string.remove))
             }
         }
+        if (!gestures.swipe && gestures.queueButton && actions.onSwipeToQueue != null) {
+            IconButton(onClick = actions.onSwipeToQueue) {
+                Icon(AppIcons.Queue, contentDescription = stringResource(R.string.move_to_end_of_queue))
+            }
+        }
         IconButton(onClick = actions.onMore) {
             Icon(AppIcons.MoreVert, contentDescription = stringResource(R.string.more_options))
         }
@@ -214,6 +223,8 @@ fun ArtworkRow(
     onClick: () -> Unit,
     /** True when [title] is an artist name (uses the artist font); otherwise an album/playlist title. */
     isArtist: Boolean = false,
+    /** A playlist's own cover file; when set it replaces [artwork]. */
+    coverFile: String? = null,
 ) {
     Row(
         modifier = Modifier
@@ -222,7 +233,11 @@ fun ArtworkRow(
             .padding(horizontal = 16.dp, vertical = 8.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        ArtworkImage(artwork = artwork, size = size, cornerRadius = size / 2)
+        if (coverFile != null) {
+            PlaylistCoverImage(coverFile, Modifier.size(size).clip(RoundedCornerShape(size / 2)))
+        } else {
+            ArtworkImage(artwork = artwork, size = size, cornerRadius = size / 2)
+        }
         Spacer(Modifier.width(12.dp))
         Column(Modifier.weight(1f)) {
             Text(

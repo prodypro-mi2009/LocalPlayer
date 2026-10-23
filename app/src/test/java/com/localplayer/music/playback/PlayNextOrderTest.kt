@@ -4,64 +4,43 @@ import org.junit.Assert.assertEquals
 import org.junit.Test
 
 class PlayNextOrderTest {
-    private data class Q(val name: String, val playNext: Boolean = false)
-
-    private fun playNext(queue: MutableList<Q>, current: Int, vararg names: String) {
-        val at = PlayNextOrder.insertIndex(current, queue.size) { queue[it].playNext }
-        queue.addAll(at, names.map { Q(it, true) })
+    private fun playNext(queue: MutableList<String>, current: Int, vararg names: String) {
+        queue.addAll(PlayNextOrder.insertIndex(current, queue.size), names.toList())
     }
 
-    private fun names(queue: List<Q>) = queue.map { it.name }
-
-    @Test
-    fun repeatedPlayNextKeepsCallOrder() {
-        val queue = mutableListOf(Q("A"), Q("B"), Q("C"))
-        playNext(queue, 0, "D")
+    @Test fun newestPlayNextPlaysFirst() {
+        val queue = mutableListOf("A", "B", "C")
         playNext(queue, 0, "E")
-        assertEquals(listOf("A", "D", "E", "B", "C"), names(queue))
+        playNext(queue, 0, "Z")
+        assertEquals(listOf("A", "Z", "E", "B", "C"), queue) // Z before E
     }
 
-    @Test
-    fun threeCallsStayInOrder() {
-        val queue = mutableListOf(Q("A"), Q("B"))
+    @Test fun threeCallsAreLastInFirstOut() {
+        val queue = mutableListOf("A", "B")
         playNext(queue, 0, "D")
         playNext(queue, 0, "E")
         playNext(queue, 0, "F")
-        assertEquals(listOf("A", "D", "E", "F", "B"), names(queue))
+        assertEquals(listOf("A", "F", "E", "D", "B"), queue)
     }
 
-    @Test
-    fun batchKeepsInternalOrder() {
-        val queue = mutableListOf(Q("A"), Q("B"))
-        playNext(queue, 0, "D", "E")
-        playNext(queue, 0, "F")
-        assertEquals(listOf("A", "D", "E", "F", "B"), names(queue))
+    @Test fun afterAdvancingNewItemsStillGoRightAfterTheCurrentSong() {
+        val queue = mutableListOf("A", "B")
+        playNext(queue, 0, "E")
+        playNext(queue, 0, "Z") // A Z E B
+        playNext(queue, 1, "Q") // Z is playing now
+        assertEquals(listOf("A", "Z", "Q", "E", "B"), queue)
     }
 
-    @Test
-    fun plainQueuedItemsAreNotSkipped() {
-        val queue = mutableListOf(Q("A"), Q("B"), Q("C"))
+    @Test fun plainQueuedItemsAreNotSkipped() {
+        val queue = mutableListOf("A", "B", "C")
         playNext(queue, 1, "D")
-        assertEquals(listOf("A", "B", "D", "C"), names(queue))
+        assertEquals(listOf("A", "B", "D", "C"), queue)
     }
 
-    @Test
-    fun afterAdvancingIntoTheBlockNewItemsGoAfterRemainingPlayNextItems() {
-        val queue = mutableListOf(Q("A"), Q("B"))
-        playNext(queue, 0, "D")
-        playNext(queue, 0, "E")
-        // D is now playing (index 1); E is still queued from Play next.
-        playNext(queue, 1, "F")
-        assertEquals(listOf("A", "D", "E", "F", "B"), names(queue))
-    }
+    @Test fun unsetCurrentIndexInsertsAtTheFront() = assertEquals(0, PlayNextOrder.insertIndex(-1, 3))
 
-    @Test
-    fun unsetCurrentIndexInsertsAtTheFront() {
-        assertEquals(0, PlayNextOrder.insertIndex(-1, 3) { false })
-    }
-
-    @Test
-    fun neverBeyondTheEnd() {
-        assertEquals(2, PlayNextOrder.insertIndex(0, 2) { true })
+    @Test fun neverBeyondTheEnd() {
+        assertEquals(2, PlayNextOrder.insertIndex(5, 2))
+        assertEquals(0, PlayNextOrder.insertIndex(-1, 0))
     }
 }

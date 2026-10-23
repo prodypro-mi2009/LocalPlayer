@@ -94,6 +94,8 @@ data class PlaylistEntity(
     @ColumnInfo(defaultValue = "0") val folderSyncRemoved: Int = 0,
     /** 0 = in step with the folder, 1 = the folder looked empty/unreadable at the last sync and nothing was removed. */
     @ColumnInfo(defaultValue = "0") val folderSyncStatus: Int = 0,
+    // --- added in database version 8: file name (inside filesDir/playlist_covers) of the user's own cover, or null ---
+    val coverFile: String? = null,
 )
 
 /**

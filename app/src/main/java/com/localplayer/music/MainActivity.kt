@@ -43,6 +43,9 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         enableEdgeToEdge()
         super.onCreate(savedInstanceState)
+        // Content always draws behind the status / navigation bars, also in an activity that was recreated after a
+        // language change (the window then once stayed "fitted" and showed a black strip under the status bar).
+        androidx.core.view.WindowCompat.setDecorFitsSystemWindows(window, false)
 
         // The sleep timer has stopped playback and the service: close the app too (also while in the background).
         lifecycleScope.launch {
@@ -63,6 +66,10 @@ class MainActivity : ComponentActivity() {
             val customFontVersion by settings.customFontVersion.collectAsStateWithLifecycle()
             val fonts = remember(fontChoices, customFontVersion) {
                 com.localplayer.music.ui.theme.AppFonts.resolve(fontChoices, container.customFont.file)
+            }
+            // Re-dispatch the insets once the first frame exists, so the new window never keeps stale (zero) bar insets.
+            androidx.compose.runtime.LaunchedEffect(Unit) {
+                androidx.core.view.ViewCompat.requestApplyInsets(window.decorView)
             }
             LocalPlayerTheme(themeMode = themeMode, dynamicColor = dynamicColor, controlColors = controlColors, fonts = fonts, pureMode = pureMode) {
                 Surface(

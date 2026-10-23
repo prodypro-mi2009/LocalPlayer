@@ -37,6 +37,22 @@ sealed interface Screen {
     data object SettingsLyrics : Screen
     data object SettingsYourMix : Screen
     data object SettingsAbout : Screen
+    data object SettingsBackup : Screen
+    data object SettingsAudio : Screen
+    data object SettingsWidgets : Screen
+    /** Settings > Download from YouTube (yt-dlp, MP3). */
+    data object SettingsDownload : Screen
+    /** Sub-pages of the settings hubs (Appearance, Library, Navigation, Audio, Your Mix). */
+    data object SettingsNavigation : Screen
+    data object SettingsTabOrder : Screen
+    data object SettingsGestures : Screen
+    data object SettingsScan : Screen
+    data object SettingsTheme : Screen
+    data object SettingsEqualizer : Screen
+    data object SettingsReplayGain : Screen
+    data object SettingsMixGeneral : Screen
+    data object SettingsMixStrategy : Screen
+    data object SettingsMixOptions : Screen
     /** Your Mix: the generated list. */
     data object YourMix : Screen
     /** Listening time per period (today, week, month, year, previous month). */
@@ -74,6 +90,20 @@ fun Screen.encode(): String = when (this) {
     Screen.SettingsLyrics -> "set-lyrics"
     Screen.SettingsYourMix -> "set-yourmix"
     Screen.SettingsAbout -> "set-about"
+    Screen.SettingsBackup -> "set-backup"
+    Screen.SettingsAudio -> "set-audio"
+    Screen.SettingsWidgets -> "set-widgets"
+    Screen.SettingsDownload -> "set-download"
+    Screen.SettingsNavigation -> "set-navigation"
+    Screen.SettingsTabOrder -> "set-taborder"
+    Screen.SettingsGestures -> "set-gestures"
+    Screen.SettingsScan -> "set-scan"
+    Screen.SettingsTheme -> "set-theme"
+    Screen.SettingsEqualizer -> "set-eq"
+    Screen.SettingsReplayGain -> "set-rg"
+    Screen.SettingsMixGeneral -> "set-mixgeneral"
+    Screen.SettingsMixStrategy -> "set-mixstrategy"
+    Screen.SettingsMixOptions -> "set-mixoptions"
     Screen.YourMix -> "yourmix"
     Screen.TimeUsage -> "timeusage"
     Screen.Top20 -> "top20"
@@ -108,6 +138,20 @@ fun decodeScreen(text: String): Screen {
             "set-lyrics" -> Screen.SettingsLyrics
             "set-yourmix" -> Screen.SettingsYourMix
             "set-about" -> Screen.SettingsAbout
+            "set-backup" -> Screen.SettingsBackup
+            "set-audio" -> Screen.SettingsAudio
+            "set-widgets" -> Screen.SettingsWidgets
+            "set-download" -> Screen.SettingsDownload
+            "set-navigation" -> Screen.SettingsNavigation
+            "set-taborder" -> Screen.SettingsTabOrder
+            "set-gestures" -> Screen.SettingsGestures
+            "set-scan" -> Screen.SettingsScan
+            "set-theme" -> Screen.SettingsTheme
+            "set-eq" -> Screen.SettingsEqualizer
+            "set-rg" -> Screen.SettingsReplayGain
+            "set-mixgeneral" -> Screen.SettingsMixGeneral
+            "set-mixstrategy" -> Screen.SettingsMixStrategy
+            "set-mixoptions" -> Screen.SettingsMixOptions
             "yourmix" -> Screen.YourMix
             "timeusage" -> Screen.TimeUsage
             "top20" -> Screen.Top20

@@ -30,6 +30,8 @@ object SleepTimer {
     private var player: ExoPlayer? = null
     private var onFinished: (() -> Unit)? = null
     private var fading = false
+    /** True while the end-of-timer fade-out runs (ReplayGain must not touch the volume then). */
+    val isFading: Boolean get() = fading
 
     private val _state = MutableStateFlow<SleepTimerState>(SleepTimerState.Off)
     val state: StateFlow<SleepTimerState> = _state.asStateFlow()
@@ -87,7 +89,7 @@ object SleepTimer {
     private fun cancelInternal(p: ExoPlayer) {
         handler.removeCallbacks(fire)
         handler.removeCallbacks(fadeStep)
-        if (fading) p.volume = 1f
+        if (fading) p.volume = PlaybackVolume.base
         fading = false
         p.pauseAtEndOfMediaItems = false
         _state.value = SleepTimerState.Off
@@ -98,7 +100,7 @@ object SleepTimer {
         override fun run() {
             val p = player ?: return
             fadeStepIndex++
-            p.volume = (1f - fadeStepIndex / FADE_STEPS.toFloat()).coerceAtLeast(0f)
+            p.volume = (1f - fadeStepIndex / FADE_STEPS.toFloat()).coerceAtLeast(0f) * PlaybackVolume.base
             if (fadeStepIndex >= FADE_STEPS) finish() else handler.postDelayed(this, FADE_STEP_MS)
         }
     }
@@ -117,7 +119,7 @@ object SleepTimer {
         p.pause()
         p.stop()
         p.clearMediaItems()
-        p.volume = 1f
+        p.volume = PlaybackVolume.base
         p.pauseAtEndOfMediaItems = false
         fading = false
         _state.value = SleepTimerState.Off

@@ -49,4 +49,20 @@ class LrcLibMatcherTest {
         val ranked = LrcLibMatcher.rank(listOf(r(1, "Γειτονιά", "Ονείρατα", 200.0)), "γειτονιά", "Ονείρατα", 201_000)
         assertEquals(LyricsMatch.GOOD, ranked.single().match)
     }
+
+    @Test fun greekAccentsAndFinalSigmaDoNotBreakMatching() {
+        val ranked = LrcLibMatcher.rank(listOf(r(1, "ΑΛΛΟΥ", "Τοκελ", 200.0)), "Αλλού", "Τόκελ", 200_000)
+        assertEquals(LyricsMatch.GOOD, ranked.single().match)
+        assertEquals(LrcLibMatcher.normalize("Νύχτας"), LrcLibMatcher.normalize("ΝΥΧΤΑΣ"))
+    }
+
+    @Test fun bracketOnlyTitleStillMatches() {
+        val ranked = LrcLibMatcher.rank(listOf(r(1, "(Intro)", "Art", 60.0)), "(Intro)", "Art", 60_000)
+        assertEquals(1, ranked.size)
+    }
+
+    @Test fun cleanTitleDropsBrackets() {
+        assertEquals("Hello", LrcLibMatcher.cleanTitle("Hello (feat. X) [Remastered]"))
+        assertEquals("(Intro)", LrcLibMatcher.cleanTitle("(Intro)"))
+    }
 }

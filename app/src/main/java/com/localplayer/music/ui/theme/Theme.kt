@@ -81,6 +81,7 @@ fun LocalPlayerTheme(
 ) {
     val dark = pureMode.forcedDark ?: themeMode.isDark(isSystemInDarkTheme())
     val context = LocalContext.current
+    val reduceMotion = rememberReduceMotion()
     val base: ColorScheme = when {
         dynamicColor && Build.VERSION.SDK_INT >= Build.VERSION_CODES.S ->
             if (dark) dynamicDarkColorScheme(context) else dynamicLightColorScheme(context)
@@ -95,6 +96,7 @@ fun LocalPlayerTheme(
         LocalControlColors provides (if (palette != null) ControlColors.None else controlColors),
         LocalPureMode provides pureMode,
         LocalAppFonts provides fonts,
+        LocalReduceMotion provides reduceMotion,
     ) {
         MaterialTheme(colorScheme = scheme, typography = appTypography(fonts), content = content)
     }

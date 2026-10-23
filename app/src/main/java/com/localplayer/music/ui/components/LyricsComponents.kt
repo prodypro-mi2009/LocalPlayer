@@ -1,6 +1,7 @@
 package com.localplayer.music.ui.components
 
 import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -26,16 +27,18 @@ import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ImageBitmap
+import androidx.compose.ui.graphics.TransformOrigin
 import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.util.lerp
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -47,6 +50,7 @@ import com.localplayer.music.data.lyrics.LyricLine
 import com.localplayer.music.data.lyrics.LyricsSync
 import com.localplayer.music.playback.ArtworkRef
 import com.localplayer.music.ui.LibraryViewModel
+import com.localplayer.music.ui.theme.Motion
 import com.localplayer.music.ui.theme.lyricsFont
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
@@ -106,6 +110,7 @@ fun SyncedLyricsList(
         snapshotFlow { listState.isScrollInProgress && !programmatic }.collect { manual -> if (manual) onUserScroll() }
     }
 
+    val reduceMotion = com.localplayer.music.ui.theme.LocalReduceMotion.current
     LazyColumn(
         state = listState,
         modifier = modifier.fillMaxSize(),
@@ -113,15 +118,33 @@ fun SyncedLyricsList(
     ) {
         itemsIndexed(lines, key = { index, line -> "$index-${line.timestampMs}" }) { index, line ->
             val active = index == activeIndex
-            val alpha by animateFloatAsState(if (active) 1f else 0.45f, label = "lyric-alpha")
+            // 0 → 1 as this line becomes the active one. Read only inside graphicsLayer, so no recomposition per frame.
+            val emphasis = animateFloatAsState(
+                targetValue = if (active) 1f else 0f,
+                animationSpec = tween(Motion.LYRIC_ACTIVE_MS, easing = Motion.EaseOut),
+                label = "lyric-emphasis",
+            )
+            // Grow from the edge the text is aligned to, so the line does not drift sideways.
+            val origin = when (textAlign) {
+                TextAlign.Center -> TransformOrigin(0.5f, 0.5f)
+                TextAlign.End, TextAlign.Right -> TransformOrigin(1f, 0.5f)
+                else -> TransformOrigin(0f, 0.5f)
+            }
             Text(
                 text = line.text.ifEmpty { "♪" },
-                style = (if (active) MaterialTheme.typography.headlineSmall else MaterialTheme.typography.titleLarge).lyricsFont(),
-                fontWeight = if (active) FontWeight.Bold else FontWeight.Normal,
+                style = MaterialTheme.typography.titleLarge.lyricsFont(),
+                fontWeight = FontWeight.Medium,
                 textAlign = textAlign,
                 modifier = Modifier
                     .fillMaxWidth()
-                    .alpha(alpha)
+                    .graphicsLayer {
+                        val e = emphasis.value
+                        alpha = lerp(0.45f, 1f, e)
+                        val s = if (reduceMotion) 1f else lerp(1f, 1.05f, e)
+                        scaleX = s
+                        scaleY = s
+                        transformOrigin = origin
+                    }
                     .clickable { onSeek(line.timestampMs) }
                     .padding(vertical = 10.dp),
             )

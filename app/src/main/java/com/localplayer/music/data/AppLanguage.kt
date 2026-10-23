@@ -19,7 +19,7 @@ enum class AppLanguage(val tag: String) {
         fun wrap(base: Context): Context {
             val saved = base.getSharedPreferences(AppSettings.PREFS_NAME, Context.MODE_PRIVATE)
                 .getString(AppSettings.KEY_LANGUAGE, null)
-            val locale = Locale(fromTag(saved).tag)
+            val locale = Locale.forLanguageTag(fromTag(saved).tag)
             Locale.setDefault(locale)
             val config = Configuration(base.resources.configuration)
             config.setLocale(locale)

@@ -32,6 +32,7 @@ import com.localplayer.music.data.library.SongSort
 import com.localplayer.music.data.library.YearItem
 import com.localplayer.music.playback.MediaItemFactory
 import com.localplayer.music.playback.PlayerState
+import com.localplayer.music.playback.QueueOps
 import com.localplayer.music.playback.QueueEntry
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
@@ -47,6 +48,8 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.debounce
 import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.first
+import kotlin.random.Random
 import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.mapLatest
@@ -55,7 +58,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
 /** A short message for the user: a string resource plus its arguments. */
-data class UiMessage(@StringRes val res: Int, val args: List<String> = emptyList())
+data class UiMessage(@param:StringRes val res: Int, val args: List<String> = emptyList())
 
 class LibraryViewModel(private val container: AppContainer) : ViewModel() {
 
@@ -174,22 +177,35 @@ class LibraryViewModel(private val container: AppContainer) : ViewModel() {
         }
     }
 
+    /**
+     * Plays the WHOLE list (no window). Shuffle policy (one rule for every way of starting a queue): the queue
+     * follows the Shuffle switch. Shuffle all ([shuffle] = true) starts at a random song and turns the switch ON,
+     * so the icon always matches the real order; Play all ([shuffle] = false) plays in list order if the switch
+     * is off and shuffled if it is on (the switch is the single source of truth, it is never silently ignored).
+     */
     fun playAll(songs: List<TrackListItem>, shuffle: Boolean) {
         if (songs.isEmpty()) return
-        val ordered = if (shuffle) songs.shuffled() else songs
-        playFrom(ordered, 0)
-    }
-
-    fun playNext(track: TrackListItem) {
-        viewModelScope.launch { player.playNext(toItems(listOf(track))) }
-    }
-
-    fun addToQueue(track: TrackListItem) {
         viewModelScope.launch {
-            player.addToQueue(toItems(listOf(track)))
-            _messages.tryEmit(UiMessage(R.string.added_to_queue))
+            val start = if (shuffle) Random.nextInt(songs.size) else 0
+            player.playQueue(toItems(songs), start, forceShuffle = shuffle)
         }
     }
+
+    /** Shuffle all of the songs matching [filter] (e.g. one tab's selection) without keeping the full library collected. */
+    fun shuffleSongs(filter: (TrackListItem) -> Boolean) {
+        viewModelScope.launch {
+            val all = library.songs(SongSort.TITLE).first()
+            val picked = withContext(Dispatchers.Default) { all.filter(filter) }
+            playAll(picked, shuffle = true)
+        }
+    }
+
+    /** Shuffle all songs of the given playlists, each song once, with a single query. */
+    fun shufflePlaylists(ids: List<Long>) {
+        viewModelScope.launch { playAll(library.tracksOfPlaylists(ids), shuffle = true) }
+    }
+
+
 
     fun togglePlayPause() = player.togglePlayPause()
     fun next() = player.next()
@@ -204,11 +220,12 @@ class LibraryViewModel(private val container: AppContainer) : ViewModel() {
     fun moveQueueItem(from: Int, to: Int) = player.moveQueueItem(from, to)
     fun moveQueueEntry(occurrenceId: String, to: Int) = player.moveQueueEntry(occurrenceId, to)
     suspend fun removeQueueEntry(occurrenceId: String) = player.removeQueueEntry(occurrenceId)
-    fun clearQueue() = player.clearQueue()
+    /** Queue screen Clear: keeps only the current song, untouched. Null when there was nothing to clear. */
+    suspend fun clearQueueExceptCurrent(): QueueOps.Cleared? = player.clearQueueExceptCurrent()
+    suspend fun undoClearQueue(cleared: QueueOps.Cleared): Boolean = player.undoClearQueue(cleared)
     suspend fun removeQueueItem(index: Int) = player.removeQueueItem(index)
     fun reinsertQueueItem(removed: PlayerConnection.RemovedItem) = player.reinsert(removed)
-    suspend fun clearUpcoming() = player.clearUpcoming()
-    fun reinsertQueueItems(removed: List<PlayerConnection.RemovedItem>) = player.reinsertAll(removed)
+    suspend fun clearUpcoming(): QueueOps.Cleared? = player.clearUpcoming()
     fun currentPositionMs(): Long = player.currentPositionMs()
 
     // --- playlists (app data) --------------------------------------------------------------
@@ -243,6 +260,20 @@ class LibraryViewModel(private val container: AppContainer) : ViewModel() {
     fun renamePlaylist(id: Long, name: String) {
         if (name.isBlank()) return
         viewModelScope.launch { library.renamePlaylist(id, name) }
+    }
+
+    fun setPlaylistCover(id: Long, source: android.net.Uri) {
+        viewModelScope.launch {
+            val ok = library.setPlaylistCover(id, source)
+            _messages.tryEmit(UiMessage(if (ok) R.string.playlist_cover_updated else R.string.playlist_cover_failed))
+        }
+    }
+
+    fun removePlaylistCover(id: Long) {
+        viewModelScope.launch {
+            library.removePlaylistCover(id)
+            _messages.tryEmit(UiMessage(R.string.playlist_cover_removed))
+        }
     }
 
     fun deletePlaylist(id: Long) {
@@ -371,6 +402,36 @@ class LibraryViewModel(private val container: AppContainer) : ViewModel() {
         data object Failed : LyricsLoad
     }
 
+    // --- optional features (all OFF by default). Each setter stores the value, then applies it at once. ---------------
+
+    fun setWidgetsEnabled(value: Boolean) {
+        settings.setWidgetsEnabled(value)
+        com.localplayer.music.widget.WidgetController.sync(container.appContext)
+    }
+
+    fun setReplayGainEnabled(value: Boolean) { settings.setReplayGainEnabled(value); com.localplayer.music.playback.AudioEffectsHub.refresh() }
+    fun setReplayGainMode(value: com.localplayer.music.data.effects.ReplayGainMode) { settings.setReplayGainMode(value); com.localplayer.music.playback.AudioEffectsHub.refresh() }
+    fun setReplayGainPreventClipping(value: Boolean) { settings.setReplayGainPreventClipping(value); com.localplayer.music.playback.AudioEffectsHub.refresh() }
+    fun setEqualizerEnabled(value: Boolean) { settings.setEqualizerEnabled(value); com.localplayer.music.playback.AudioEffectsHub.refresh() }
+    fun setEqPreset(value: com.localplayer.music.data.effects.EqPreset) { settings.setEqPreset(value); com.localplayer.music.playback.AudioEffectsHub.refresh() }
+    fun setEqCustomBand(index: Int, db: Float) {
+        val g = settings.eqCustom.value.copyOf()
+        g[index] = db
+        settings.setEqCustom(g)
+        settings.setEqPreset(com.localplayer.music.data.effects.EqPreset.CUSTOM)
+        com.localplayer.music.playback.AudioEffectsHub.refresh()
+    }
+    fun resetEqualizer() {
+        settings.setEqCustom(com.localplayer.music.data.effects.EqModel.flat())
+        settings.setEqPreset(com.localplayer.music.data.effects.EqPreset.FLAT)
+        com.localplayer.music.playback.AudioEffectsHub.refresh()
+    }
+    /** After a settings import: apply restored values to the running player and widgets. */
+    fun reapplyOptionalFeatures() {
+        com.localplayer.music.playback.AudioEffectsHub.refresh()
+        com.localplayer.music.widget.WidgetController.sync(container.appContext)
+    }
+
     /** Bumped whenever lyrics were written into a file, so an open Lyrics page reloads them from the file. */
     private val _lyricsRevision = MutableStateFlow(0)
     val lyricsRevision: StateFlow<Int> = _lyricsRevision.asStateFlow()
@@ -397,22 +458,19 @@ class LibraryViewModel(private val container: AppContainer) : ViewModel() {
     // --- queue snapshot / undo -------------------------------------------------------------
 
     /** Appends the track to the END of the queue as its own occurrence; returns the id for a targeted Undo. */
-    suspend fun appendToQueueEnd(track: TrackListItem): String = player.appendOccurrence(toItems(listOf(track)).first())
+    suspend fun appendToQueueEnd(track: TrackListItem): QueueOps.Added = player.appendOccurrence(toItems(listOf(track)).first())
 
     /** Swipe right: inserts the track as the next song (one new occurrence); returns its id for a targeted Undo. */
-    suspend fun insertNextInQueue(track: TrackListItem): String = player.insertNextOccurrence(toItems(listOf(track)).first())
+    suspend fun insertNextInQueue(track: TrackListItem): QueueOps.Added = player.insertNextOccurrence(toItems(listOf(track)).first())
 
     /** Undo of [appendToQueueEnd] / [insertNextInQueue]: removes exactly that occurrence; the current track is not touched. */
-    suspend fun undoAppend(occurrenceId: String): Boolean = player.removeOccurrence(occurrenceId)
+    suspend fun undoAppend(added: QueueOps.Added): Boolean = player.removeOccurrence(added)
 
-    /** Clears the queue; the returned snapshot restores queue, current track and position. */
-    suspend fun dismissQueue(): PlayerConnection.QueueSnapshot? {
-        val snapshot = player.snapshot()
-        player.clearQueue()
-        return snapshot
-    }
+    /** Mini-player dismiss: clears the queue; the returned snapshot (a token for exactly that state) allows one Undo. */
+    suspend fun dismissQueue(): PlayerConnection.QueueSnapshot? = player.dismissQueue()
 
-    fun restoreQueue(snapshot: PlayerConnection.QueueSnapshot) = player.restore(snapshot)
+    /** Undo of [dismissQueue]; false (nothing changed) when the queue was touched after the dismissal. */
+    suspend fun restoreQueue(snapshot: PlayerConnection.QueueSnapshot): Boolean = player.restoreQueue(snapshot)
 
     // --- settings --------------------------------------------------------------------------
 

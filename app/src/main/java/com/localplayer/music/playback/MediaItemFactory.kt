@@ -15,6 +15,7 @@ object MediaItemFactory {
     private const val EXTRA_HAS_ARTWORK = "has_artwork"
     private const val EXTRA_PLAY_NEXT = "play_next"
     private const val EXTRA_OCCURRENCE = "occurrence_id"
+    private const val EXTRA_RANK = "shuffle_rank"
 
     /** URI scheme understood by [ArtworkBitmapLoader]; used so the media notification can show embedded art. */
     const val ARTWORK_SCHEME = "trackart"
@@ -71,6 +72,47 @@ object MediaItemFactory {
         val extras = Bundle(item.mediaMetadata.extras ?: Bundle.EMPTY).apply { putString(EXTRA_OCCURRENCE, occurrenceId) }
         val metadata = item.mediaMetadata.buildUpon().setExtras(extras).build()
         return item.buildUpon().setMediaMetadata(metadata).build()
+    }
+
+    /** A copy of [item] remembering the queue position it had when Shuffle was turned on. */
+    fun withRank(item: MediaItem, rank: Int): MediaItem {
+        val extras = Bundle(item.mediaMetadata.extras ?: Bundle.EMPTY).apply { putInt(EXTRA_RANK, rank) }
+        val metadata = item.mediaMetadata.buildUpon().setExtras(extras).build()
+        return item.buildUpon().setMediaMetadata(metadata).build()
+    }
+
+    fun withoutRank(item: MediaItem): MediaItem {
+        val extras = Bundle(item.mediaMetadata.extras ?: Bundle.EMPTY).apply { remove(EXTRA_RANK) }
+        val metadata = item.mediaMetadata.buildUpon().setExtras(extras).build()
+        return item.buildUpon().setMediaMetadata(metadata).build()
+    }
+
+    /** A copy without the Play next flag and without a shuffle rank (a queue that is being replaced starts clean). */
+    fun clean(item: MediaItem): MediaItem {
+        val extras = Bundle(item.mediaMetadata.extras ?: Bundle.EMPTY).apply {
+            remove(EXTRA_RANK)
+            remove(EXTRA_PLAY_NEXT)
+        }
+        val metadata = item.mediaMetadata.buildUpon().setExtras(extras).build()
+        return item.buildUpon().setMediaMetadata(metadata).build()
+    }
+
+    /** -1 when the item has no rank. */
+    fun rank(item: MediaItem): Int = item.mediaMetadata.extras?.getInt(EXTRA_RANK, -1) ?: -1
+
+    /** Rebuilds a saved queue entry: same occurrence id, Play next flag and rank as when it was saved. */
+    fun restored(
+        track: TrackListItem,
+        unknownArtist: String,
+        unknownAlbum: String,
+        occurrenceId: String,
+        playNext: Boolean,
+        rank: Int,
+    ): MediaItem {
+        var item = withOccurrence(create(track, unknownArtist, unknownAlbum), occurrenceId)
+        if (playNext) item = markPlayNext(item)
+        if (rank >= 0) item = withRank(item, rank)
+        return item
     }
 
     fun occurrenceId(item: MediaItem): String? = item.mediaMetadata.extras?.getString(EXTRA_OCCURRENCE)

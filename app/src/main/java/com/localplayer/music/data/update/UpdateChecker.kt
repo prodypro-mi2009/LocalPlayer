@@ -57,7 +57,7 @@ class UpdateChecker(private val userAgent: String) {
             when (val code = connection.responseCode) {
                 200 -> {
                     val body = connection.inputStream.bufferedReader().use { it.readText() }
-                    val release = parseRelease(body) ?: return@withContext UpdateCheck.NoRelease
+                    val release = parseRelease(body, repo) ?: return@withContext UpdateCheck.NoRelease
                     if (VersionCompare.isNewer(release.tag, currentVersion)) UpdateCheck.Newer(release)
                     else UpdateCheck.UpToDate(release.tag)
                 }
@@ -72,32 +72,37 @@ class UpdateChecker(private val userAgent: String) {
         }
     }
 
-    fun parseRelease(body: String): ReleaseInfo? = try {
-        val o = JSONObject(body)
-        val tag = o.optString("tag_name").takeIf { it.isNotEmpty() } ?: return null
-        val assets = o.optJSONArray("assets")
-        var name: String? = null; var url: String? = null; var size = 0L; var sha: String? = null
-        if (assets != null) {
+    /**
+     * Reads the release JSON. Drafts, pre-releases and unreadable tags give null (= treated as "no release"). The
+     * page and APK links are kept only when they belong to the configured repository on github.com.
+     */
+    fun parseRelease(body: String, repo: String): ReleaseInfo? {
+        val o = try {
+            JSONObject(body)
+        } catch (e: Exception) {
+            return null
+        }
+        if (o.optBoolean("draft", false) || o.optBoolean("prerelease", false)) return null
+        val tag = o.optString("tag_name").takeIf { VersionCompare.isValid(it) } ?: return null
+        val list = ArrayList<UpdateRules.Asset>()
+        o.optJSONArray("assets")?.let { assets ->
             for (i in 0 until assets.length()) {
                 val a = assets.optJSONObject(i) ?: continue
-                val n = a.optString("name")
-                if (n.endsWith(".apk", ignoreCase = true) && !n.contains("debug", ignoreCase = true)) {
-                    name = n; url = a.optString("browser_download_url").takeIf { it.isNotEmpty() }
-                    size = a.optLong("size", 0L)
-                    sha = a.optString("digest").takeIf { it.startsWith("sha256:") }?.removePrefix("sha256:")?.lowercase()
-                    break
-                }
+                val url = a.optString("browser_download_url")
+                if (!UpdateRules.isAllowedDownloadUrl(url, repo)) continue
+                list += UpdateRules.Asset(a.optString("name"), url, a.optLong("size", 0L), a.optString("digest"))
             }
         }
-        ReleaseInfo(
+        val apk = UpdateRules.pickApk(list)
+        return ReleaseInfo(
             tag = tag,
             title = o.optString("name").ifEmpty { tag },
             notes = o.optString("body"),
-            pageUrl = o.optString("html_url"),
-            apkName = name, apkUrl = url, apkSize = size, apkSha256 = sha,
+            pageUrl = o.optString("html_url").takeIf { UpdateRules.isAllowedReleasePage(it, repo) }
+                ?: "https://github.com/$repo/releases",
+            apkName = apk?.name, apkUrl = apk?.url, apkSize = apk?.size ?: 0L,
+            apkSha256 = apk?.digest?.takeIf { it.startsWith("sha256:") }?.removePrefix("sha256:")?.lowercase(),
         )
-    } catch (e: Exception) {
-        null
     }
 
     /** Streams the APK into [target], reporting 0..1 progress, and verifies size and (when published) SHA-256. */

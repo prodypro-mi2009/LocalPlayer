@@ -42,6 +42,25 @@ class BackgroundRepository(private val context: Context, private val settings: A
         }
     }
 
+    /** The stored picture file for a backup, or null when there is no custom background. */
+    fun fileForBackup(): File? = file.takeIf { it.isFile && it.length() > 0 }
+
+    /** Restores a picture from a verified backup file (it must decode as an image). Returns false and changes nothing otherwise. */
+    suspend fun restoreFrom(source: File): Boolean = withContext(Dispatchers.IO) {
+        try {
+            val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+            BitmapFactory.decodeFile(source.path, bounds)
+            if (bounds.outWidth <= 0 || bounds.outHeight <= 0) return@withContext false
+            val temp = File(file.path + ".tmp")
+            source.copyTo(temp, overwrite = true)
+            if (!temp.renameTo(file)) { temp.delete(); return@withContext false }
+            settings.setBackgroundVersion(System.currentTimeMillis())
+            true
+        } catch (e: Exception) {
+            false
+        }
+    }
+
     fun reset() {
         file.delete()
         settings.setBackgroundVersion(0L)

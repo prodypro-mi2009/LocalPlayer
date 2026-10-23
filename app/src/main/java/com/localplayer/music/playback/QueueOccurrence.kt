@@ -20,12 +20,23 @@ object QueueOccurrence {
         object IsPlayingNow : UndoPlan
     }
 
-    /** [occurrenceIds] = occurrence id of every queue entry in order (null for entries not added by the gesture). */
-    fun planUndo(occurrenceIds: List<String?>, currentIndex: Int, occurrenceId: String): UndoPlan {
+    /**
+     * [occurrenceIds] = occurrence id of every queue entry in order (null for entries not added by the gesture).
+     *
+     * [currentNotStarted] = the entry is the selected one only because it was added to an empty queue and the
+     * user has not started listening to it (not playing, no play requested, position still at the start).
+     * Such an entry may be removed even though it is the current index.
+     */
+    fun planUndo(
+        occurrenceIds: List<String?>,
+        currentIndex: Int,
+        occurrenceId: String,
+        currentNotStarted: Boolean = false,
+    ): UndoPlan {
         val index = occurrenceIds.indexOf(occurrenceId)
         return when {
             index < 0 -> UndoPlan.AlreadyGone
-            index == currentIndex -> UndoPlan.IsPlayingNow
+            index == currentIndex && !currentNotStarted -> UndoPlan.IsPlayingNow
             else -> UndoPlan.Remove(index)
         }
     }

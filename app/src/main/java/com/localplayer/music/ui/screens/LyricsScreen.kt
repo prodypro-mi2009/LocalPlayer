@@ -1,7 +1,6 @@
 package com.localplayer.music.ui.screens
 
 import androidx.compose.animation.animateColorAsState
-import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -19,6 +18,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
@@ -40,6 +40,7 @@ import com.localplayer.music.ui.nav.Screen
 import com.localplayer.music.ui.theme.ArtworkGradient
 import com.localplayer.music.ui.theme.ForceStatusBarIcons
 import com.localplayer.music.ui.theme.LocalPureMode
+import com.localplayer.music.ui.theme.Motion
 import com.localplayer.music.ui.theme.fallbackTint
 import com.localplayer.music.ui.theme.lyricsVerticalBrush
 
@@ -58,9 +59,9 @@ fun LyricsScreen(nav: NavState, viewModel: LibraryViewModel, tone: Color?) {
     val state by viewModel.playerState.collectAsStateWithLifecycle()
     val now = state.nowPlaying
     val blurred = rememberBlurredArtwork(now?.artwork)
-    val tint by animateColorAsState(
+    val tint = animateColorAsState(
         targetValue = tone ?: fallbackTint(),
-        animationSpec = tween(durationMillis = 500),
+        animationSpec = Motion.AmbientTint,
         label = "lyricsTint",
     )
     val pure = LocalPureMode.current.isOn
@@ -77,7 +78,7 @@ fun LyricsScreen(nav: NavState, viewModel: LibraryViewModel, tone: Color?) {
     Box(Modifier.fillMaxSize().background(if (pure) MaterialTheme.colorScheme.background else Color.Black)) {
         if (!pure) {
             BlurredBackdrop(blurred)
-            Box(Modifier.fillMaxSize().background(lyricsVerticalBrush(tint)))
+            Box(Modifier.fillMaxSize().drawBehind { drawRect(lyricsVerticalBrush(tint.value)) })
             Box(Modifier.fillMaxSize().background(Color.Black.copy(alpha = ArtworkGradient.LYRICS_SCRIM)))
         }
         CompositionLocalProvider(LocalContentColor provides (if (pure) MaterialTheme.colorScheme.onBackground else Color.White)) {

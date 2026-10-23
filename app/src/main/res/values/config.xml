@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <!-- GitHub repository ("owner/name") that publishes the releases of this app. Leave empty until it is set:
-         About then shows that updates are not configured, and no update request is ever made. -->
-    <string name="github_repo" translatable="false"></string>
+    <!-- GitHub repository ("owner/name") that publishes the releases of this app. If it is empty, About shows that updates are not configured
+         and no update request is ever made. -->
+    <string name="github_repo" translatable="false">prodypro-mi2009/LocalPlayer</string>
 </resources>

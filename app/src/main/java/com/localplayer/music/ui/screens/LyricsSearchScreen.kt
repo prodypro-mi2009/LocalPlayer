@@ -66,6 +66,11 @@ fun LyricsSearchScreen(trackId: Long, nav: NavState, library: LibraryViewModel, 
         key = "edit-lyrics-search-$trackId",
         factory = viewModelFactory { initializer { EditMetadataViewModel(container, trackId) } },
     )
+    // A new search every time this screen is shown; leaving it cancels a running request.
+    androidx.compose.runtime.DisposableEffect(search) {
+        search.search()
+        onDispose { search.cancel() }
+    }
     val s by search.state.collectAsStateWithLifecycle()
     val edit by editor.state.collectAsStateWithLifecycle()
     EditEvents(viewModel = editor, onSaved = {

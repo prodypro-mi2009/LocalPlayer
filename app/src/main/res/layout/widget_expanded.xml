@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:id="@+id/widget_root"
+    android:layout_width="match_parent" android:layout_height="match_parent"
+    android:orientation="vertical" android:gravity="center_horizontal"
+    android:background="@drawable/widget_bg" android:padding="10dp">
+    <ImageView android:id="@+id/widget_art" android:layout_width="match_parent" android:layout_height="0dp" android:layout_weight="1"
+        android:background="@drawable/widget_art_placeholder" android:scaleType="centerCrop" android:adjustViewBounds="false"
+        android:contentDescription="@null"/>
+    <TextView android:id="@+id/widget_title" android:layout_width="match_parent" android:layout_height="wrap_content"
+        android:layout_marginTop="6dp" android:textColor="#FFFFFFFF" android:textSize="14sp" android:textStyle="bold"
+        android:maxLines="1" android:ellipsize="end" android:gravity="center"/>
+    <TextView android:id="@+id/widget_artist" android:layout_width="match_parent" android:layout_height="wrap_content"
+        android:textColor="#FFC9C5CA" android:textSize="12sp" android:maxLines="1" android:ellipsize="end" android:gravity="center"/>
+    <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content"
+        android:orientation="horizontal" android:gravity="center" android:layout_marginTop="2dp">
+        <ImageButton android:id="@+id/widget_prev" android:layout_width="44dp" android:layout_height="40dp"
+            android:background="?android:attr/selectableItemBackgroundBorderless" android:src="@drawable/ic_widget_prev" android:contentDescription="@string/previous_track"/>
+        <ImageButton android:id="@+id/widget_play" android:layout_width="52dp" android:layout_height="40dp"
+            android:background="?android:attr/selectableItemBackgroundBorderless" android:src="@drawable/ic_widget_play" android:contentDescription="@string/play"/>
+        <ImageButton android:id="@+id/widget_next" android:layout_width="44dp" android:layout_height="40dp"
+            android:background="?android:attr/selectableItemBackgroundBorderless" android:src="@drawable/ic_widget_next" android:contentDescription="@string/next_track"/>
+    </LinearLayout>
+</LinearLayout>

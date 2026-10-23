@@ -1,5 +1,7 @@
 package com.localplayer.music.ui.screens
 
+import com.localplayer.music.ui.components.FadingLazyColumn
+
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.Arrangement
@@ -84,7 +86,7 @@ fun HiddenSongsScreen(nav: NavState, viewModel: LibraryViewModel) {
         when {
             list == null -> Unit
             list.isEmpty() -> EmptyState(stringResource(R.string.hidden_songs_empty), Modifier.fillMaxSize())
-            else -> LazyColumn(Modifier.fillMaxSize(), contentPadding = barPadding(extra = 8.dp)) {
+            else -> FadingLazyColumn(Modifier.fillMaxSize(), contentPadding = barPadding(extra = 8.dp)) {
                 item(key = "note") {
                     Text(
                         stringResource(R.string.hidden_songs_note),
@@ -137,7 +139,7 @@ fun LibraryFoldersScreen(nav: NavState, viewModel: LibraryViewModel) {
 
     Column(Modifier.fillMaxSize()) {
         DetailTopBar(title = stringResource(R.string.library_folders), onBack = { nav.pop() })
-        LazyColumn(Modifier.fillMaxSize(), contentPadding = barPadding(extra = 16.dp)) {
+        FadingLazyColumn(Modifier.fillMaxSize(), contentPadding = barPadding(extra = 16.dp)) {
             item(key = "intro") {
                 Column(Modifier.padding(horizontal = 16.dp, vertical = 8.dp)) {
                     Text(
@@ -168,7 +170,7 @@ fun LibraryFoldersScreen(nav: NavState, viewModel: LibraryViewModel) {
 
             item(key = "added-header") { SectionHeader(stringResource(R.string.added_folders)) }
             val folders = state
-            if (folders == null) return@LazyColumn
+            if (folders == null) return@FadingLazyColumn
             if (folders.added.isEmpty()) {
                 item(key = "added-empty") {
                     Text(

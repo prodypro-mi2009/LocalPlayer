@@ -62,4 +62,20 @@ class QueueOccurrenceTest {
         undo(q, "o")
         assertEquals(1, q.current) // still the same MediaItem, one slot earlier
     }
+
+    @Test fun firstItemOfAnEmptyQueueCanBeUndoneWhileNotStarted() {
+        val plan = QueueOccurrence.planUndo(listOf("a"), currentIndex = 0, occurrenceId = "a", currentNotStarted = true)
+        assertEquals(QueueOccurrence.UndoPlan.Remove(0), plan)
+    }
+
+    @Test fun firstItemCannotBeUndoneOnceListeningStarted() {
+        val plan = QueueOccurrence.planUndo(listOf("a"), currentIndex = 0, occurrenceId = "a", currentNotStarted = false)
+        assertEquals(QueueOccurrence.UndoPlan.IsPlayingNow, plan)
+    }
+
+    @Test fun notStartedFlagDoesNotAllowRemovingAnotherCurrentEntry() {
+        // entry "b" is not the current one: removal is the normal targeted removal either way
+        val plan = QueueOccurrence.planUndo(listOf("a", "b"), currentIndex = 0, occurrenceId = "b", currentNotStarted = true)
+        assertEquals(QueueOccurrence.UndoPlan.Remove(1), plan)
+    }
 }

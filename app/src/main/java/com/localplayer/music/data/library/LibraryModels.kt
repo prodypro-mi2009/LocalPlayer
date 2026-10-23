@@ -47,6 +47,8 @@ data class PlaylistItem(
     val folderSyncRemoved: Int = 0,
     /** True when the folder looked empty/unreadable at the last sync and nothing was removed. */
     val folderUnavailable: Boolean = false,
+    /** File name of the user's own cover (see PlaylistCoverStore), or null: the 2x2 collage of the songs is shown. */
+    val coverFile: String? = null,
 ) {
     val isFolderLinked: Boolean get() = sourceFolderKey != null
 }

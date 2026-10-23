@@ -3,12 +3,10 @@ package com.localplayer.music.playback
 /** Pure queue-position logic for "Play next" (no Android classes, so it is unit-tested on the JVM). */
 object PlayNextOrder {
     /**
-     * Index at which a new "Play next" batch goes: right after the current item and after the
-     * contiguous run of items that were themselves queued with Play next.
+     * Policy: the newest Play next always goes IMMEDIATELY after the current item. So if E is queued with Play
+     * next and then Z before the current track advances, Z plays before E (last in, first out). The same holds
+     * with Shuffle on, because the queue order is the playback order.
      */
-    fun insertIndex(currentIndex: Int, itemCount: Int, isPlayNext: (Int) -> Boolean): Int {
-        var index = (currentIndex + 1).coerceAtLeast(0)
-        while (index < itemCount && isPlayNext(index)) index++
-        return index.coerceAtMost(itemCount)
-    }
+    fun insertIndex(currentIndex: Int, itemCount: Int): Int =
+        (currentIndex + 1).coerceIn(0, itemCount.coerceAtLeast(0))
 }

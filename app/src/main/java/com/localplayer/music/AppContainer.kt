@@ -49,11 +49,28 @@ class AppContainer(val appContext: Context) {
         MediaStoreFastScanner(appContext, database.trackDao(), searchIndex, coordinator)
     }
     private val folderAccess: FolderAccess by lazy { FolderAccess(appContext) }
-    val library: LibraryRepository by lazy {
-        LibraryRepository(database, scanner, fastScanner, coordinator, settings, searchIndex, folderAccess)
+    val playlistCovers: com.localplayer.music.data.artwork.PlaylistCoverStore by lazy {
+        com.localplayer.music.data.artwork.PlaylistCoverStore(appContext)
     }
-    val metadata: MetadataRepository by lazy { MetadataRepository(appContext, database, searchIndex) { artwork.invalidate(it) } }
+    val library: LibraryRepository by lazy {
+        LibraryRepository(database, scanner, fastScanner, coordinator, settings, searchIndex, folderAccess, playlistCovers)
+    }
+    val downloads: com.localplayer.music.data.download.DownloadManager by lazy {
+        com.localplayer.music.data.download.DownloadManager(appContext, settings) { library.rescan() }
+    }
+    val replayGain: com.localplayer.music.data.effects.ReplayGainRepository by lazy {
+        com.localplayer.music.data.effects.ReplayGainRepository(appContext)
+    }
+    val metadata: MetadataRepository by lazy {
+        MetadataRepository(appContext, database, searchIndex) {
+            artwork.invalidate(it)
+            com.localplayer.music.playback.AudioEffectsHub.onTrackChanged(it)
+        }
+    }
     val audioSpecs: AudioSpecReader by lazy { AudioSpecReader(appContext) }
+    val settingsBackup: com.localplayer.music.data.backup.SettingsBackupManager by lazy {
+        com.localplayer.music.data.backup.SettingsBackupManager(appContext, settings, background, customFont)
+    }
     val background: BackgroundRepository by lazy { BackgroundRepository(appContext, settings) }
     val customFont: com.localplayer.music.data.artwork.CustomFontRepository by lazy {
         com.localplayer.music.data.artwork.CustomFontRepository(appContext, settings)

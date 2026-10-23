@@ -10,6 +10,7 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.aspectRatio
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
@@ -32,6 +33,15 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.draw.drawWithContent
+import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.graphics.BlendMode
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.CompositingStrategy
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.foundation.lazy.LazyListState
+import androidx.compose.foundation.lazy.grid.LazyGridState
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.input.pointer.pointerInput
@@ -270,6 +280,26 @@ fun ArtworkCollage(artworks: List<ArtworkRef>, modifier: Modifier = Modifier) {
     }
 }
 
+/** The user's own playlist cover (a small square JPEG from [com.localplayer.music.data.artwork.PlaylistCoverStore]). */
+@Composable
+fun PlaylistCoverImage(coverFile: String, modifier: Modifier = Modifier) {
+    val store = (LocalContext.current.applicationContext as com.localplayer.music.LocalPlayerApp).container.playlistCovers
+    var bitmap by remember(coverFile) { mutableStateOf(store.peek(coverFile)) }
+    androidx.compose.runtime.LaunchedEffect(coverFile) {
+        if (bitmap == null) bitmap = store.load(coverFile)
+    }
+    Box(modifier.background(MaterialTheme.colorScheme.surfaceVariant)) {
+        bitmap?.let {
+            androidx.compose.foundation.Image(
+                bitmap = it.asImageBitmap(),
+                contentDescription = null,
+                contentScale = androidx.compose.ui.layout.ContentScale.Crop,
+                modifier = Modifier.fillMaxSize(),
+            )
+        }
+    }
+}
+
 /** Floating round back button for the bottom-left corner of detail screens. */
 @Composable
 fun BottomBackButton(onBack: () -> Unit, modifier: Modifier = Modifier) {
@@ -346,4 +376,57 @@ fun DetailHero(
             }
         }
     }
+}
+
+
+private val TopFadeHeight = 72.dp
+
+/** Smoothstep alpha stops for a fade that is fully transparent at the top edge. */
+private fun Modifier.topFadeImpl(strength: (Float) -> Float): Modifier = this
+    .graphicsLayer { compositingStrategy = CompositingStrategy.Offscreen }
+    .drawWithContent {
+        drawContent()
+        val h = TopFadeHeight.toPx()
+        val s = strength(h).coerceIn(0f, 1f)
+        if (s > 0.01f) {
+            val stops = Array(9) { i ->
+                val t = i / 8f
+                val smooth = t * t * (3f - 2f * t)
+                t to Color.Black.copy(alpha = 1f - s * (1f - smooth))
+            }
+            drawRect(
+                brush = Brush.verticalGradient(colorStops = stops, startY = 0f, endY = h),
+                size = Size(size.width, h),
+                blendMode = BlendMode.DstIn,
+            )
+        }
+    }
+
+/**
+ * Soft ~72dp fade at the top edge of a scrolling list, so content dissolves into the backdrop instead
+ * of being cut by a hard line under the controls row. Strength follows the scroll offset, so a list at
+ * rest is untouched.
+ */
+fun Modifier.topFade(state: LazyListState): Modifier = topFadeImpl { h ->
+    if (state.firstVisibleItemIndex > 0) 1f else state.firstVisibleItemScrollOffset / h
+}
+
+fun Modifier.topFade(state: LazyGridState): Modifier = topFadeImpl { h ->
+    if (state.firstVisibleItemIndex > 0) 1f else state.firstVisibleItemScrollOffset / h
+}
+
+/** A [androidx.compose.foundation.lazy.LazyColumn] with the soft top-edge fade ([topFade]) built in. */
+@Composable
+fun FadingLazyColumn(
+    modifier: Modifier = Modifier,
+    state: LazyListState = androidx.compose.foundation.lazy.rememberLazyListState(),
+    contentPadding: androidx.compose.foundation.layout.PaddingValues = androidx.compose.foundation.layout.PaddingValues(0.dp),
+    content: androidx.compose.foundation.lazy.LazyListScope.() -> Unit,
+) {
+    androidx.compose.foundation.lazy.LazyColumn(
+        modifier = modifier.topFade(state),
+        state = state,
+        contentPadding = contentPadding,
+        content = content,
+    )
 }

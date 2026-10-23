@@ -2,6 +2,9 @@ package com.localplayer.music.data
 
 import android.content.Context
 import android.os.Build
+import com.localplayer.music.data.effects.EqModel
+import com.localplayer.music.data.effects.EqPreset
+import com.localplayer.music.data.effects.ReplayGainMode
 import com.localplayer.music.data.mix.MixRefresh
 import com.localplayer.music.data.mix.MixSettings
 import com.localplayer.music.data.personalization.ControlColors
@@ -174,6 +177,33 @@ class AppSettings(context: Context) {
         _autoUpdateCheck.value = value
     }
 
+    private val _swipeActions = MutableStateFlow(prefs.getBoolean(KEY_SWIPE_ACTIONS, true))
+    /** Swipe left/right on a song row (queue end / play next). Off = the gesture does nothing at all. */
+    val swipeActionsEnabled: StateFlow<Boolean> = _swipeActions.asStateFlow()
+
+    fun setSwipeActionsEnabled(value: Boolean) {
+        prefs.edit().putBoolean(KEY_SWIPE_ACTIONS, value).apply()
+        _swipeActions.value = value
+    }
+
+    private val _queueButton = MutableStateFlow(prefs.getBoolean(KEY_QUEUE_BUTTON, false))
+    /** A button on every song row that appends it to the queue. Only shown while swipe actions are off. */
+    val queueButtonEnabled: StateFlow<Boolean> = _queueButton.asStateFlow()
+
+    fun setQueueButtonEnabled(value: Boolean) {
+        prefs.edit().putBoolean(KEY_QUEUE_BUTTON, value).apply()
+        _queueButton.value = value
+    }
+
+    private val _downloadFolder = MutableStateFlow(prefs.getString(KEY_DOWNLOAD_FOLDER, null))
+    /** Tree URI chosen as the download folder; null = Music/LocalPlayer. */
+    val downloadFolder: StateFlow<String?> = _downloadFolder.asStateFlow()
+
+    fun setDownloadFolder(uri: String?) {
+        prefs.edit().apply { if (uri == null) remove(KEY_DOWNLOAD_FOLDER) else putString(KEY_DOWNLOAD_FOLDER, uri) }.apply()
+        _downloadFolder.value = uri
+    }
+
     var lastUpdateCheckAt: Long
         get() = prefs.getLong(KEY_LAST_UPDATE_CHECK, 0L)
         set(value) { prefs.edit().putLong(KEY_LAST_UPDATE_CHECK, value).apply() }
@@ -183,7 +213,73 @@ class AppSettings(context: Context) {
         get() = prefs.getString(KEY_KNOWN_NEWER, "").orEmpty()
         set(value) { prefs.edit().putString(KEY_KNOWN_NEWER, value).apply() }
 
+    // --- optional features: ALL default to OFF and do nothing until the user switches them on -------------------
+
+    private val _widgetsEnabled = MutableStateFlow(prefs.getBoolean(KEY_WIDGETS, false))
+    /** Master switch of the home-screen widgets. Off = widgets show an inactive state and receive no updates. */
+    val widgetsEnabled: StateFlow<Boolean> = _widgetsEnabled.asStateFlow()
+    fun setWidgetsEnabled(value: Boolean) {
+        prefs.edit().putBoolean(KEY_WIDGETS, value).apply()
+        _widgetsEnabled.value = value
+    }
+    /** Synchronous read for widget callbacks that run before any flow is observed. */
+    fun widgetsEnabledNow(): Boolean = prefs.getBoolean(KEY_WIDGETS, false)
+
+    private val _replayGainEnabled = MutableStateFlow(prefs.getBoolean(KEY_RG, false))
+    val replayGainEnabled: StateFlow<Boolean> = _replayGainEnabled.asStateFlow()
+    fun setReplayGainEnabled(value: Boolean) {
+        prefs.edit().putBoolean(KEY_RG, value).apply()
+        _replayGainEnabled.value = value
+    }
+
+    private val _replayGainMode = MutableStateFlow(ReplayGainMode.fromKey(prefs.getString(KEY_RG_MODE, null)))
+    val replayGainMode: StateFlow<ReplayGainMode> = _replayGainMode.asStateFlow()
+    fun setReplayGainMode(value: ReplayGainMode) {
+        prefs.edit().putString(KEY_RG_MODE, value.key).apply()
+        _replayGainMode.value = value
+    }
+
+    private val _replayGainPreventClipping = MutableStateFlow(prefs.getBoolean(KEY_RG_CLIP, true))
+    val replayGainPreventClipping: StateFlow<Boolean> = _replayGainPreventClipping.asStateFlow()
+    fun setReplayGainPreventClipping(value: Boolean) {
+        prefs.edit().putBoolean(KEY_RG_CLIP, value).apply()
+        _replayGainPreventClipping.value = value
+    }
+
+    private val _equalizerEnabled = MutableStateFlow(prefs.getBoolean(KEY_EQ, false))
+    val equalizerEnabled: StateFlow<Boolean> = _equalizerEnabled.asStateFlow()
+    fun setEqualizerEnabled(value: Boolean) {
+        prefs.edit().putBoolean(KEY_EQ, value).apply()
+        _equalizerEnabled.value = value
+    }
+
+    private val _eqPreset = MutableStateFlow(EqPreset.fromKey(prefs.getString(KEY_EQ_PRESET, null)))
+    val eqPreset: StateFlow<EqPreset> = _eqPreset.asStateFlow()
+    fun setEqPreset(value: EqPreset) {
+        prefs.edit().putString(KEY_EQ_PRESET, value.key).apply()
+        _eqPreset.value = value
+    }
+
+    private val _eqCustom = MutableStateFlow(EqModel.parseCustom(prefs.getString(KEY_EQ_CUSTOM, null)) ?: EqModel.flat())
+    /** Gains (dB) of the Custom profile for the five logical bands. */
+    val eqCustom: StateFlow<FloatArray> = _eqCustom.asStateFlow()
+    fun setEqCustom(gains: FloatArray) {
+        val g = FloatArray(EqModel.BANDS) { EqModel.clamp(gains.getOrElse(it) { 0f }) }
+        prefs.edit().putString(KEY_EQ_CUSTOM, EqModel.serializeCustom(g)).apply()
+        _eqCustom.value = g
+    }
+
     companion object {
+        private const val KEY_WIDGETS = "widgetsEnabled"
+        private const val KEY_DOWNLOAD_FOLDER = "downloadFolder"
+        private const val KEY_SWIPE_ACTIONS = "swipeActionsEnabled"
+        private const val KEY_QUEUE_BUTTON = "queueButtonEnabled"
+        private const val KEY_RG = "replayGainEnabled"
+        private const val KEY_RG_MODE = "replayGainMode"
+        private const val KEY_RG_CLIP = "replayGainPreventClipping"
+        private const val KEY_EQ = "equalizerEnabled"
+        private const val KEY_EQ_PRESET = "eqPreset"
+        private const val KEY_EQ_CUSTOM = "eqCustom"
         private const val KEY_AUTO_UPDATE = "autoUpdateCheck"
         private const val KEY_LAST_UPDATE_CHECK = "lastUpdateCheckAt"
         private const val KEY_KNOWN_NEWER = "knownNewerVersion"

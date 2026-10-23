@@ -18,7 +18,9 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.stringResource
@@ -28,6 +30,7 @@ import com.localplayer.music.R
 import com.localplayer.music.playback.NowPlaying
 import com.localplayer.music.ui.components.AppIcons
 import com.localplayer.music.ui.components.ArtworkImage
+import com.localplayer.music.ui.theme.pressScale
 
 @Composable
 fun MiniPlayer(
@@ -41,7 +44,8 @@ fun MiniPlayer(
     onNext: () -> Unit,
     onPrevious: () -> Unit,
 ) {
-    val position = rememberPlaybackPosition(isPlaying, now.mediaId, positionMs)
+    // Read only in the draw lambda of the progress bar below: a step redraws one 2 dp bar, nothing recomposes.
+    val progress = rememberSmoothFraction(isPlaying, now.mediaId, durationMs, positionMs)
 
     Column(
         modifier = Modifier
@@ -73,19 +77,38 @@ fun MiniPlayer(
             val skipColors = if (skipColor != null) IconButtonDefaults.iconButtonColors(contentColor = skipColor) else IconButtonDefaults.iconButtonColors()
             val playColor = controlColor(ControlColorGroup.PLAY_PAUSE)
             val playColors = if (playColor != null) IconButtonDefaults.iconButtonColors(contentColor = playColor) else IconButtonDefaults.iconButtonColors()
-            IconButton(onClick = onPrevious, colors = skipColors) {
+            val previousSource = remember { MutableInteractionSource() }
+            val playSource = remember { MutableInteractionSource() }
+            val nextSource = remember { MutableInteractionSource() }
+            IconButton(
+                onClick = onPrevious,
+                colors = skipColors,
+                interactionSource = previousSource,
+                modifier = Modifier.pressScale(previousSource),
+            ) {
                 Icon(
                     imageVector = AppIcons.SkipPrevious,
                     contentDescription = stringResource(R.string.previous_track),
                 )
             }
-            IconButton(onClick = onTogglePlayPause, colors = playColors) {
+            IconButton(
+                onClick = onTogglePlayPause,
+                colors = playColors,
+                interactionSource = playSource,
+                modifier = Modifier.pressScale(playSource),
+            ) {
                 Icon(
                     imageVector = if (isPlaying) AppIcons.Pause else AppIcons.Play,
                     contentDescription = stringResource(if (isPlaying) R.string.pause else R.string.play),
                 )
             }
-            IconButton(onClick = onNext, enabled = hasNext, colors = skipColors) {
+            IconButton(
+                onClick = onNext,
+                enabled = hasNext,
+                colors = skipColors,
+                interactionSource = nextSource,
+                modifier = Modifier.pressScale(nextSource),
+            ) {
                 Icon(
                     imageVector = AppIcons.SkipNext,
                     contentDescription = stringResource(R.string.next_track),
@@ -93,9 +116,7 @@ fun MiniPlayer(
             }
         }
         LinearProgressIndicator(
-            progress = {
-                if (durationMs > 0) (position.longValue.toFloat() / durationMs).coerceIn(0f, 1f) else 0f
-            },
+            progress = { progress.floatValue },
             modifier = Modifier
                 .fillMaxWidth()
                 .height(2.dp),

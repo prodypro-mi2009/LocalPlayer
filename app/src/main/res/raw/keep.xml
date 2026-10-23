@@ -1,0 +1,3 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Resource shrinking must not drop yt-dlp's bundled script (res/raw/ytdlp), which is only read by name at run time. -->
+<resources xmlns:tools="http://schemas.android.com/tools" tools:keep="@raw/*" />

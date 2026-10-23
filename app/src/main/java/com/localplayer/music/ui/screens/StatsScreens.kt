@@ -1,5 +1,7 @@
 package com.localplayer.music.ui.screens
 
+import com.localplayer.music.ui.components.FadingLazyColumn
+
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -176,7 +178,7 @@ fun Top20Screen(nav: NavState, viewModel: LibraryViewModel) {
         when {
             list == null -> Unit
             list.isEmpty() -> EmptyState(stringResource(R.string.stats_top20_empty))
-            else -> LazyColumn(Modifier.fillMaxSize(), contentPadding = androidx.compose.foundation.layout.PaddingValues(bottom = 24.dp + LocalBottomBarInset.current)) {
+            else -> FadingLazyColumn(Modifier.fillMaxSize(), contentPadding = androidx.compose.foundation.layout.PaddingValues(bottom = 24.dp + LocalBottomBarInset.current)) {
                 itemsIndexed(list, key = { _, r -> r.track.id }) { index, row ->
                     Row(
                         Modifier.fillMaxWidth().heightIn(min = 64.dp)

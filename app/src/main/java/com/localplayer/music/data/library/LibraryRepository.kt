@@ -45,6 +45,7 @@ class LibraryRepository(
     private val settings: AppSettings,
     private val searchIndex: SearchIndex,
     private val folderAccess: FolderAccess,
+    private val playlistCovers: com.localplayer.music.data.artwork.PlaylistCoverStore,
 ) {
     private val tracks = database.trackDao()
     private val playlists = database.playlistDao()
@@ -404,7 +405,7 @@ class LibraryRepository(
                 val name = TextNormalizer.fold(row.name)
                 foldedTokens.all { name.contains(it) }
             }
-            .map { PlaylistItem(it.id, it.name, it.trackCount, it.totalDurationMs) }
+            .map { PlaylistItem(it.id, it.name, it.trackCount, it.totalDurationMs, coverFile = it.coverFile) }
 
         return SearchResults(
             songs = songs,
@@ -423,6 +424,10 @@ class LibraryRepository(
 
     fun playlistTracks(id: Long): Flow<List<TrackListItem>> = playlists.observeTracks(id)
 
+    /** One-shot list of the songs of several playlists, each song once (used by Shuffle on the Playlists tab). */
+    suspend fun tracksOfPlaylists(ids: List<Long>): List<TrackListItem> =
+        if (ids.isEmpty()) emptyList() else playlists.tracksOfPlaylists(ids)
+
     fun playlistArtwork(id: Long): Flow<List<ArtworkRef>> =
         playlists.observeArtwork(id).map { rows -> rows.map { ArtworkRef(it.trackId, it.uri, it.lastModified) } }
 
@@ -434,7 +439,27 @@ class LibraryRepository(
     suspend fun renamePlaylist(id: Long, name: String) =
         playlists.rename(id, name.trim(), System.currentTimeMillis())
 
-    suspend fun deletePlaylist(id: Long) = playlists.delete(id)
+    suspend fun deletePlaylist(id: Long) {
+        val cover = playlists.getPlaylist(id)?.coverFile
+        playlists.delete(id)
+        playlistCovers.delete(cover)
+    }
+
+    /** Sets the playlist's own cover from a picked picture. Returns false (nothing changed) if it could not be read. */
+    suspend fun setPlaylistCover(id: Long, source: android.net.Uri): Boolean {
+        val old = playlists.getPlaylist(id) ?: return false
+        val name = playlistCovers.save(id, source) ?: return false
+        playlists.setCover(id, name, System.currentTimeMillis())
+        playlistCovers.delete(old.coverFile)
+        return true
+    }
+
+    /** Back to the automatic collage of the playlist's songs. */
+    suspend fun removePlaylistCover(id: Long) {
+        val old = playlists.getPlaylist(id)?.coverFile ?: return
+        playlists.setCover(id, null, System.currentTimeMillis())
+        playlistCovers.delete(old)
+    }
 
     /** One track appears at most once per playlist; repeated adds are counted, not duplicated. */
     suspend fun addToPlaylist(playlistId: Long, trackUris: List<String>): AddResult {
@@ -498,5 +523,6 @@ class LibraryRepository(
         folderSyncAdded = folderSyncAdded,
         folderSyncRemoved = folderSyncRemoved,
         folderUnavailable = folderSyncStatus == 1,
+        coverFile = coverFile,
     )
 }

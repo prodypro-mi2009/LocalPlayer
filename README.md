@@ -1,105 +1,37 @@
-LocalPlayer — A Modern Offline Music Player for Android
-LocalPlayer is a native Android music player designed for people who want full control over their local music library, a clean modern interface, and useful playback features without the overhead of a streaming platform.
+# Local Player v0.3.0 (foundation)
 
-Built with Kotlin, Jetpack Compose, Material 3, Room, and Android Media3, LocalPlayer focuses on local music playback, library organization, personalization, listening statistics, and a customizable user experience.
+Offline, audio-only Android music player (Kotlin, Compose, Material 3, Media3, Room). No Internet permission.
 
-The goal is simple: deliver a polished, lightweight music player that keeps your music and listening experience under your control.
+## Library: AUDIO ONLY
+- Imports `.mp3 .flac .m4a .aac`. `.mp4` is never imported (even audio-only), there is no video library, no
+  video scanning and no `READ_MEDIA_VIDEO`. Android 13+ asks for `READ_MEDIA_AUDIO` only.
+- Two scanners, chosen in Settings (**Use MediaStore scanner**, persistent, Android 11+):
+  - OFF (normal): MediaStore lists the audio files, the tags of every new/changed file are read FROM THE FILE.
+  - ON (fast): ONLY `MediaStore.Audio.Media` - files and tags come from MediaStore, no file is opened, no fallback.
+    Rows made this way are re-read from the files by the normal scanner when you switch back.
+- Rows left from older video-aware versions are removed on the next scan.
 
-#Download here: https://github.com/prodypro-mi2009/LocalPlayer/releases/download/v.1.0.5/v.1.0.5.apk
+## The audio file is the source of truth
+Tags, lyrics and artwork live in the file. Room is cache/index + app data (playlists, history, favorites, primary-artist
+classification). Saving tags or lyrics: working copy -> edit only what changed -> verify -> replace -> re-read the real
+file (tags, lyrics and the SHA-256 of every embedded picture must match) -> only then update the cache. Backup restored on failure.
 
-##✨ Features
+## Features in this version
+- Favorites (Room, keyed by track URI: survive rescans, tag edits and updates). Heart in Now Playing.
+- Synchronized LRC lyrics (parser, offset, multiple timestamps) following the real Media3 position; plain lyrics; editor with
+  timestamps from the playback position; written into the file (MP3 USLT, FLAC LYRICS, M4A lyrics atom).
+- Audio specs chip (sample rate / bitrate / format) from the file.
+- Sleep timer (5-60 min, end of song, custom), lives in the playback service, fades out, stops service, closes app.
+- Queue snapshot/undo: swipe a song left = move to end of queue (Undo); swipe the mini player left = clear queue (Undo, 5 s).
+- Track menu bottom sheet (fixed order): Play next, Add to queue, Add to playlist | Go to queue, Go to album, Go to artist |
+  Edit tag, Edit lyrics.
+- Themes: System / Light (#FFFFFF) / Dark (#000000), dynamic color on/off; background picture from the photo picker (+ button),
+  stored privately, dimmed.
+- Years has no UI entry (the route and data remain).
 
+## Database
+Room version 5. Migrations 3->4 and 4->5 keep all data (no destructive path from 3). 4->5 adds `favorites`.
 
-##🎵 Local Music Library
-Browse and play music stored on your Android device.
-Support for MP3, FLAC, M4A, and AAC audio files.
-Organize your collection through songs, albums, artists, favorites, and playlists.
-Search your library with support for Greek text and accent-insensitive matching.
-Scan and index your music library for convenient access.
-Hide unwanted tracks from relevant library views.
-
-##▶️ Playback Experience
-Background playback powered by Android Media3 and ExoPlayer.
-Media session integration for Android playback controls.
-Queue management with support for repeated tracks.
-Recently played history and playback navigation.
-Mini-player and expanded Now Playing interface.
-Playback progress and queue controls designed for everyday use.
-
-##🎨 Modern Interface
-Native Jetpack Compose interface using Material 3.
-Clean, artwork-focused music screens.
-Dark interface with a true-black visual direction.
-Artwork-aware colors and customizable local background options.
-Dedicated settings and metadata editing interfaces.
-A mobile-first design inspired by modern Android music players.
-
-##❤️ Favorites, Playlists & Queue
-Mark tracks as favorites for quick access.
-Create and manage playlists.
-Control the playback queue.
-Preserve individual queue entries when the same track appears more than once.
-Undo supported queue changes without unnecessarily restarting the current track.
-
-##📊 Listening Statistics
-Track actual playback time through the playback service.
-View listening time across daily, weekly, monthly, and yearly periods.
-Explore your most-played tracks with Top 20 lists.
-Maintain listening statistics locally using a Room database.
-Separate listening duration from qualifying play counts.
-
-##🎧 Your Mix
-Your Mix creates personalized music selections from your own local library and listening activity.
-Available selection strategies include:
-Most Played — prioritize frequently played tracks.
-Most Forgotten — rediscover tracks that have not been played recently.
-Random — generate a random selection.
-Smart Mix — combine selection signals for a more varied listening session.
-Additional controls include mix size, listening history period, recency weighting, variety, and avoidance of recently played tracks. When listening history is limited, the mix can fall back to newer or randomly selected tracks.
-
-##📝 Lyrics & Music Metadata
-The project includes functionality for managing music metadata and lyrics, with planned or implemented integrations depending on the current release:
-Embedded metadata editing.
-Album artwork management.
-Lyrics lookup through LRCLIB.
-Support for synchronized LRC lyrics where available.
-Preference for local, embedded music information where supported.
-Actual support depends on the file format, available metadata, and the functionality included in the specific release.
-
-##⏱️ Additional Features
-Sleep timer options.
-Customizable playback and interface settings.
-Library scanning controls.
-Accessibility improvements for supported interactive controls.
-Local database storage for library indexing, playlists, history, and listening statistics.
-
-##🔒 Privacy & Local-First Design
-LocalPlayer is designed around a local music collection rather than a cloud streaming library.
-Music playback uses audio files stored on your device.
-Library data, playlists, and listening statistics are stored locally.
-No streaming subscription is required to play your own music.
-No account is required for core local playback.
-External services, such as LRCLIB for lyrics, may require an internet connection when used.
-
-##🛠️ Technology Stack
-Language: Kotlin
-UI: Jetpack Compose
-Design system: Material 3
-Database: Room
-Playback: Android Media3 / ExoPlayer
-Architecture: Single-Activity Android application with ViewModels and a playback service
-
-##📱 Platform
-Android
-Designed for on-device music libraries
-Supports compatible local MP3, FLAC, M4A, and AAC files
-
-##🚧 Development Status
-LocalPlayer is actively developed. Features and behavior may evolve between releases.
-
-Builds, migrations, playback behavior, and device-specific functionality should be verified for each release before being considered production-ready.
-
-🏷️ Topics
-android music-player offline-music local-music kotlin jetpack-compose material3 media3 exoplayer room-database lyrics lrc music-library your-mix android-app
-
-LocalPlayer — Your music. Your library. Your control.
+## Build / tests
+`.\gradlew assembleDebug`, `.\gradlew testDebugUnitTest` (JVM: real tag round trips on MP3/FLAC/M4A fixtures, LRC, parsers),
+`.\gradlew connectedDebugAndroidTest` (migrations, playlists, favorites, history, search).

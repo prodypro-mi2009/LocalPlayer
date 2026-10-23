@@ -24,11 +24,14 @@
     <uses-permission android:name="android.permission.READ_MEDIA_VISUAL_USER_SELECTED" tools:node="remove" />
     <uses-permission android:name="android.permission.ACCESS_MEDIA_LOCATION" tools:node="remove" />
 
-    <!-- Internet is used ONLY for two things the user starts or allows: LRCLIB lyrics search (button press) and the
-         update check / APK download from the project's GitHub Releases. The library, statistics and everything else
+    <!-- Internet is used ONLY for things the user starts or allows: LRCLIB lyrics search (button press), the
+         update check / APK download from the project's GitHub Releases, and the YouTube downloads the user starts. The library, statistics and everything else
          stay local; there is no analytics, ads or tracking. Network state is never read. -->
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" tools:node="remove" />
+    <!-- "Download from YouTube" (Settings): keeps a started download running while the app is in the background. -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
+
     <!-- Lets the user open the downloaded release APK in Android's own installer (which asks for confirmation). -->
     <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
 
@@ -72,5 +75,21 @@
                 <action android:name="androidx.media3.session.MediaSessionService" />
             </intent-filter>
         </service>
+
+        <!-- Runs the user-started YouTube downloads (see Settings > Download from YouTube). -->
+        <service
+            android:name=".data.download.DownloadService"
+            android:exported="false"
+            android:foregroundServiceType="dataSync" />
+
+        <!-- Home-screen widgets: inactive (no controls, no updates) until the user enables them in Settings > Widgets. -->
+        <receiver android:name=".widget.CompactWidgetProvider" android:exported="false">
+            <intent-filter><action android:name="android.appwidget.action.APPWIDGET_UPDATE" /></intent-filter>
+            <meta-data android:name="android.appwidget.provider" android:resource="@xml/widget_compact_info" />
+        </receiver>
+        <receiver android:name=".widget.ExpandedWidgetProvider" android:exported="false">
+            <intent-filter><action android:name="android.appwidget.action.APPWIDGET_UPDATE" /></intent-filter>
+            <meta-data android:name="android.appwidget.provider" android:resource="@xml/widget_expanded_info" />
+        </receiver>
     </application>
 </manifest>

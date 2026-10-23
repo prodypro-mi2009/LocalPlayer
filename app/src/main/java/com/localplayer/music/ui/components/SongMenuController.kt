@@ -53,13 +53,15 @@ class SongMenuController(
      */
     fun addToQueueEndWithUndo(song: TrackListItem) {
         feedback.scope.launch {
-            val occurrenceId = viewModel.appendToQueueEnd(song)
+            val added = viewModel.appendToQueueEnd(song)
             val result = feedback.snackbar.showSnackbar(
                 message = strings(R.string.moved_to_end_of_queue),
                 actionLabel = strings(R.string.undo),
                 duration = SnackbarDuration.Short,
             )
-            if (result == SnackbarResult.ActionPerformed) viewModel.undoAppend(occurrenceId)
+            if (result == SnackbarResult.ActionPerformed && !viewModel.undoAppend(added)) {
+                feedback.snackbar.showSnackbar(message = strings(R.string.undo_not_possible), duration = SnackbarDuration.Short)
+            }
         }
     }
 
@@ -70,13 +72,15 @@ class SongMenuController(
      */
     fun playNextWithUndo(song: TrackListItem) {
         feedback.scope.launch {
-            val occurrenceId = viewModel.insertNextInQueue(song)
+            val added = viewModel.insertNextInQueue(song)
             val result = feedback.snackbar.showSnackbar(
                 message = strings(R.string.added_play_next),
                 actionLabel = strings(R.string.undo),
                 duration = SnackbarDuration.Short,
             )
-            if (result == SnackbarResult.ActionPerformed) viewModel.undoAppend(occurrenceId)
+            if (result == SnackbarResult.ActionPerformed && !viewModel.undoAppend(added)) {
+                feedback.snackbar.showSnackbar(message = strings(R.string.undo_not_possible), duration = SnackbarDuration.Short)
+            }
         }
     }
 
@@ -101,8 +105,8 @@ class SongMenuController(
                 track = track,
                 onDismiss = { menuTrack = null },
                 actions = TrackMenuActions(
-                    onPlayNext = { viewModel.playNext(track) },
-                    onAddToQueue = { viewModel.addToQueue(track) },
+                    onPlayNext = { playNextWithUndo(track) },
+                    onAddToQueue = { addToQueueEndWithUndo(track) },
                     onAddToPlaylist = { playlistTargetUris = listOf(track.uri) },
                     onGoToQueue = { nav.push(Screen.Queue) },
                     onGoToAlbum = {

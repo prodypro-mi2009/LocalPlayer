@@ -43,9 +43,13 @@ fun ConfigureSystemBars(activity: ComponentActivity, dark: Boolean) {
         }
         activity.enableEdgeToEdge(statusBarStyle = style, navigationBarStyle = style)
         val window = activity.window
+        WindowCompat.setDecorFitsSystemWindows(window, false)
         window.setBackgroundDrawable(ColorDrawable(if (dark) AppColors.TrueBlack.toArgb() else AppColors.TrueWhite.toArgb()))
         if (Build.VERSION.SDK_INT >= 29) window.isNavigationBarContrastEnforced = false
-        if (Build.VERSION.SDK_INT >= 28) {
+        // Only touch the attributes when needed: re-assigning them forces a relayout of a window that was just recreated.
+        if (Build.VERSION.SDK_INT >= 28 &&
+            window.attributes.layoutInDisplayCutoutMode != WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_SHORT_EDGES
+        ) {
             window.attributes = window.attributes.also {
                 it.layoutInDisplayCutoutMode = WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_SHORT_EDGES
             }

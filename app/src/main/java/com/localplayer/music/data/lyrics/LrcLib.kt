@@ -37,11 +37,23 @@ object LrcLibMatcher {
     private const val GOOD_SEC = 3.0
     private const val POSSIBLE_SEC = 10.0
 
-    fun normalize(text: String?): String =
-        text.orEmpty().lowercase()
-            .replace(Regex("""\([^)]*\)|\[[^]]*]"""), " ")      // (feat. X), [Remastered]
-            .replace(Regex("""[^\p{L}\p{N}]+"""), " ")
-            .trim()
+    private val brackets = Regex("""\([^)]*\)|\[[^\]]*\]""")
+    private val combiningMarks = Regex("[\u0300-\u036F]")
+    private val nonWord = Regex("""[^\p{L}\p{N}]+""")
+
+    /** Lower case, accents / Greek tonos removed (Αλλού = Αλλου), final sigma = sigma, no brackets, no punctuation. */
+    fun normalize(text: String?): String {
+        val folded = java.text.Normalizer.normalize(text.orEmpty().lowercase(), java.text.Normalizer.Form.NFD)
+            .replace(combiningMarks, "")
+            .replace('ς', 'σ')
+        val withoutBrackets = folded.replace(brackets, " ").replace(nonWord, " ").trim()
+        // A title that is ONLY a bracket, like "(Intro)", must not become empty and match nothing.
+        return withoutBrackets.ifEmpty { folded.replace(nonWord, " ").trim() }
+    }
+
+    /** The title without "(feat. X)" / "[Remastered]" parts, for an extra search query; the original when nothing is left. */
+    fun cleanTitle(title: String): String =
+        title.replace(brackets, " ").replace(Regex("\\s+"), " ").trim().ifEmpty { title.trim() }
 
     private fun sameText(a: String, b: String): Boolean {
         if (a.isEmpty() || b.isEmpty()) return false

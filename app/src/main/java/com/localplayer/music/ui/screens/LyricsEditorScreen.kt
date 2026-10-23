@@ -13,6 +13,8 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.AssistChip
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.FilterChip
@@ -53,6 +55,7 @@ import com.localplayer.music.ui.components.DetailTopBar
 import com.localplayer.music.ui.components.SyncedLyricsList
 import com.localplayer.music.ui.components.rememberActiveLyricIndex
 import com.localplayer.music.ui.nav.NavState
+import com.localplayer.music.ui.nav.Screen
 import com.localplayer.music.ui.player.rememberPlaybackPosition
 
 /**
@@ -94,7 +97,7 @@ fun LyricsEditorScreen(
         val document = remember(original) { LyricsEditorModel.fromRaw(original.lyrics) }
         val rows = remember(original) { mutableStateListOf<EditorLine>().apply { addAll(document.lines) } }
         var nextId by remember(original) { mutableLongStateOf((document.lines.maxOfOrNull { it.id } ?: 0L) + 1) }
-        var preview by remember { mutableStateOf(false) }
+        var confirmSearch by remember { mutableStateOf(false) }
         // Text mode: the whole lyrics as one multiline field (paste everything at once). Switching back parses it into rows.
         var textMode by remember { mutableStateOf(false) }
         var bulkText by remember { mutableStateOf("") }
@@ -104,56 +107,68 @@ fun LyricsEditorScreen(
         val position = rememberPlaybackPosition(playerState.isPlaying, playerState.nowPlaying?.mediaId, library::currentPositionMs)
         val editable = state.canEdit && !state.saving
 
-        Text(
-            stringResource(if (state.canEdit) R.string.keeps_hidden_tags else R.string.edit_unsupported),
-            style = MaterialTheme.typography.bodySmall,
-            color = if (state.canEdit) MaterialTheme.colorScheme.onSurfaceVariant else MaterialTheme.colorScheme.error,
-            modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp),
-        )
+        // Only the problem is shown; the "tags are kept" note is gone.
+        if (!state.canEdit) {
+            Text(
+                stringResource(R.string.edit_unsupported),
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.error,
+                modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp),
+            )
+        }
 
-        // Playback helper for creating timestamps.
+        // Edits not saved yet (the search screen replaces this editor's content).
+        val dirty = if (textMode) {
+            bulkText != LyricsEditorModel.toText(document)
+        } else {
+            header != document.header || rows.toList() != document.lines
+        }
+        val openSearch = { nav.push(Screen.LyricsSearch(trackId)) }
+
         Row(
-            Modifier.fillMaxWidth().padding(horizontal = 16.dp),
+            Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(8.dp),
         ) {
-            if (isCurrentSong) {
-                IconButton(onClick = library::togglePlayPause) {
-                    Icon(
-                        if (playerState.isPlaying) AppIcons.Pause else AppIcons.Play,
-                        contentDescription = stringResource(if (playerState.isPlaying) R.string.pause else R.string.play),
-                    )
-                }
-                Text(LrcParser.formatTimestamp(position.longValue), style = MaterialTheme.typography.titleMedium)
-            } else {
-                OutlinedButton(onClick = { library.playTrack(trackId) }) { Text(stringResource(R.string.lyrics_play_song)) }
-            }
-            Row(Modifier.weight(1f), horizontalArrangement = Arrangement.End) {
-                FilterChip(
-                    selected = textMode,
-                    enabled = editable,
-                    onClick = {
-                        if (!textMode) {
-                            bulkText = LyricsEditorModel.toText(EditorDocument(header, rows.toList()))
-                            preview = false
-                        } else {
-                            val parsed = LyricsEditorModel.fromRaw(bulkText, nextId)
-                            header = parsed.header
-                            rows.clear(); rows.addAll(parsed.lines)
-                            nextId = (parsed.lines.maxOfOrNull { it.id } ?: nextId) + 1
-                        }
-                        textMode = !textMode
-                    },
-                    label = { Text(stringResource(R.string.lyrics_text_mode)) },
-                )
-                Spacer(Modifier.width(8.dp))
-                FilterChip(
-                    selected = preview,
-                    enabled = !textMode,
-                    onClick = { preview = !preview },
-                    label = { Text(stringResource(R.string.lyrics_preview)) },
-                )
-            }
+            // Works for any song, also when it is not playing.
+            AssistChip(
+                onClick = { if (dirty) confirmSearch = true else openSearch() },
+                enabled = !state.saving,
+                leadingIcon = { Icon(AppIcons.Search, contentDescription = null, modifier = Modifier.size(18.dp)) },
+                label = { Text(stringResource(R.string.lyrics_search_internet), maxLines = 1) },
+            )
+            FilterChip(
+                selected = textMode,
+                enabled = editable,
+                onClick = {
+                    if (!textMode) {
+                        bulkText = LyricsEditorModel.toText(EditorDocument(header, rows.toList()))
+                    } else {
+                        val parsed = LyricsEditorModel.fromRaw(bulkText, nextId)
+                        header = parsed.header
+                        rows.clear(); rows.addAll(parsed.lines)
+                        nextId = (parsed.lines.maxOfOrNull { it.id } ?: nextId) + 1
+                    }
+                    textMode = !textMode
+                },
+                label = { Text(stringResource(R.string.lyrics_text_mode), maxLines = 1) },
+            )
+        }
+
+        if (confirmSearch) {
+            AlertDialog(
+                onDismissRequest = { confirmSearch = false },
+                title = { Text(stringResource(R.string.lyrics_search_unsaved_title)) },
+                text = { Text(stringResource(R.string.lyrics_search_unsaved_message)) },
+                confirmButton = {
+                    TextButton(onClick = { confirmSearch = false; openSearch() }) {
+                        Text(stringResource(R.string.lyrics_search_unsaved_continue))
+                    }
+                },
+                dismissButton = {
+                    TextButton(onClick = { confirmSearch = false }) { Text(stringResource(R.string.cancel)) }
+                },
+            )
         }
 
         if (textMode) {
@@ -164,18 +179,6 @@ fun LyricsEditorScreen(
                 label = { Text(stringResource(R.string.lyrics_text_mode)) },
                 modifier = Modifier.weight(1f).fillMaxWidth().padding(16.dp),
             )
-        } else if (preview) {
-            val lines = LyricsEditorModel.previewLines(EditorDocument(header, rows.toList()))
-            val active = rememberActiveLyricIndex(library, lines, playerState.isPlaying && isCurrentSong)
-            Column(Modifier.weight(1f)) {
-                SyncedLyricsList(
-                    lines = lines,
-                    activeIndex = active,
-                    follow = true,
-                    onUserScroll = {},
-                    onSeek = { library.seekTo(it) },
-                )
-            }
         } else {
             LazyColumn(Modifier.weight(1f), contentPadding = androidx.compose.foundation.layout.PaddingValues(16.dp)) {
                 itemsIndexed(rows, key = { _, row -> row.id }) { index, row ->
@@ -187,7 +190,7 @@ fun LyricsEditorScreen(
                                 enabled = editable,
                                 singleLine = true,
                                 placeholder = { Text(stringResource(R.string.lyrics_time_hint)) },
-                                modifier = Modifier.width(120.dp),
+                                modifier = Modifier.width(104.dp),
                             )
                             Text(" ")
                             OutlinedTextField(
@@ -198,7 +201,7 @@ fun LyricsEditorScreen(
                                 modifier = Modifier.weight(1f),
                             )
                         }
-                        Row {
+                        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
                             IconButton(
                                 onClick = { rows[index] = row.copy(timeText = LrcParser.formatTimestamp(position.longValue)) },
                                 enabled = editable && isCurrentSong,

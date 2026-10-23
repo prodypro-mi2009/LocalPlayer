@@ -32,8 +32,8 @@ android {
         applicationId = "com.localplayer.music"
         minSdk = 26
         targetSdk = 36
-        versionCode = 11
-        versionName = "1.0.5"
+        versionCode = 27
+        versionName = "1.4.2"
 
         // ARM64 first. There is no native code in this app yet, so this only
         // guarantees that no unneeded architectures are ever packaged.
@@ -89,6 +89,10 @@ android {
     }
 
     packaging {
+        // yt-dlp's Python and FFmpeg are executed straight from the app's native library folder.
+        jniLibs {
+            useLegacyPackaging = true
+        }
         resources {
             excludes += "/META-INF/{AL2.0,LGPL2.1}"
         }
@@ -131,7 +135,13 @@ dependencies {
     implementation("androidx.media3:media3-exoplayer:$media3")
     implementation("androidx.media3:media3-session:$media3")
 
+    // yt-dlp for Android (Python + FFmpeg are bundled as native libraries): the "Download from YouTube" screen.
+    implementation("io.github.junkfood02.youtubedl-android:library:0.18.1")
+    implementation("io.github.junkfood02.youtubedl-android:ffmpeg:0.17.2")
+
     testImplementation("junit:junit:4.13.2")
+    // Android's org.json is only a stub in local unit tests; this is the real implementation (tests only).
+    testImplementation("org.json:json:20231013")
 
     androidTestImplementation("androidx.test.ext:junit:1.2.1")
     androidTestImplementation("androidx.test:runner:1.6.2")

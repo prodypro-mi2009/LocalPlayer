@@ -1,5 +1,7 @@
 package com.localplayer.music.ui.screens
 
+import com.localplayer.music.ui.components.FadingLazyColumn
+
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -104,7 +106,7 @@ internal fun TrackListDetail(
                 header()
                 EmptyState(emptyText)
             }
-            else -> LazyColumn(Modifier.fillMaxSize(), contentPadding = barPadding(extra = 16.dp)) {
+            else -> FadingLazyColumn(Modifier.fillMaxSize(), contentPadding = barPadding(extra = 16.dp)) {
                 item(key = "hero") {
                     DetailHero(
                         title = title,
@@ -189,7 +191,7 @@ fun AlbumScreen(screen: Screen.Album, nav: NavState, viewModel: LibraryViewModel
             EmptyState(stringResource(R.string.empty_library))
             return@Column
         }
-        LazyColumn(Modifier.fillMaxSize(), contentPadding = barPadding(extra = 16.dp)) {
+        FadingLazyColumn(Modifier.fillMaxSize(), contentPadding = barPadding(extra = 16.dp)) {
             item(key = "hero") {
                 DetailHero(
                     title = title,

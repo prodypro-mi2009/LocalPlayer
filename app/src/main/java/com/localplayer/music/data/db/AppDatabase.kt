@@ -20,7 +20,7 @@ import androidx.sqlite.db.SupportSQLiteDatabase
         LibraryFolderEntity::class,
         ListeningDayEntity::class,
     ],
-    version = 7,
+    version = 8,
     exportSchema = true,
 )
 abstract class AppDatabase : RoomDatabase() {
@@ -71,6 +71,17 @@ abstract class AppDatabase : RoomDatabase() {
                 migration6to7Statements.forEach { db.execSQL(it) }
             }
         }
+
+        /** 7 -> 8: custom playlist cover (file name). One nullable column; every existing row is kept. */
+        val MIGRATION_7_8 = object : Migration(7, 8) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                migration7to8Statements.forEach { db.execSQL(it) }
+            }
+        }
+
+        val migration7to8Statements: List<String> = listOf(
+            "ALTER TABLE `playlists` ADD COLUMN `coverFile` TEXT",
+        )
 
         val migration6to7Statements: List<String> = listOf(
             "CREATE TABLE IF NOT EXISTS `listening_days` (`day` INTEGER NOT NULL, `trackUri` TEXT NOT NULL, " +
@@ -131,7 +142,7 @@ abstract class AppDatabase : RoomDatabase() {
 
         fun create(context: Context): AppDatabase =
             Room.databaseBuilder(context, AppDatabase::class.java, "library.db")
-                .addMigrations(MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7)
+                .addMigrations(MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7, MIGRATION_7_8)
                 // Versions 1-2 (early folder-picker builds) held only a rebuildable index.
                 // Version 3 -> 4 is a real migration; there is no destructive path from 3.
                 .fallbackToDestructiveMigrationFrom(true, 1, 2)

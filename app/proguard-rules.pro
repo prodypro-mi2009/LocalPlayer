@@ -8,3 +8,16 @@
 -dontwarn sun.**
 -dontwarn org.jaudiotagger.**
 -dontwarn okio.**
+
+# yt-dlp for Android: Python/FFmpeg launchers and the JSON mapper are reached by reflection.
+-keep class com.yausername.** { *; }
+-keep class com.fasterxml.jackson.** { *; }
+-dontwarn com.fasterxml.jackson.**
+-dontwarn org.apache.commons.compress.**
+-dontwarn org.tukaani.xz.**
+-dontwarn com.github.luben.**
+-dontwarn org.brotli.**
+-dontwarn com.aayushatharva.**
+-keepattributes Signature,*Annotation*,InnerClasses,EnclosingMethod
+-keep class org.apache.commons.** { *; }
+-keep class kotlin.Metadata { *; }

@@ -1,5 +1,7 @@
 package com.localplayer.music.ui.screens
 
+import com.localplayer.music.ui.components.FadingLazyColumn
+
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -153,7 +155,7 @@ fun SearchScreen(nav: NavState, viewModel: LibraryViewModel, menu: SongMenuContr
                 query.isBlank() -> EmptyState(stringResource(R.string.search_prompt))
                 found == null -> Unit
                 found.isEmpty -> EmptyState(stringResource(R.string.empty_search))
-                else -> LazyColumn(Modifier.fillMaxSize(), state = listState, contentPadding = barPadding(extra = 8.dp)) {
+                else -> FadingLazyColumn(Modifier.fillMaxSize(), state = listState, contentPadding = barPadding(extra = 8.dp)) {
                     if (showSongs && found.songs.isNotEmpty()) {
                         item(key = "h-songs") { SectionHeader(stringResource(R.string.section_songs)) }
                         items(found.songs.size, key = { "s-${found.songs[it].id}" }) { index ->

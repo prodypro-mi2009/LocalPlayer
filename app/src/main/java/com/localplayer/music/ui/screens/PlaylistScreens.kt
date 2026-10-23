@@ -1,7 +1,20 @@
 package com.localplayer.music.ui.screens
 
+import androidx.compose.foundation.gestures.scrollBy
+import kotlinx.coroutines.isActive
+import androidx.compose.foundation.lazy.LazyItemScope
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.zIndex
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.foundation.gestures.detectDragGestures
+import androidx.compose.foundation.background
+import com.localplayer.music.ui.components.FadingLazyColumn
+
 import com.localplayer.music.ui.components.barInsetBelowKeyboard
 import androidx.compose.foundation.clickable
+import androidx.compose.ui.draw.clip
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -125,8 +138,86 @@ fun PlaylistScreen(screen: Screen.Playlist, nav: NavState, viewModel: LibraryVie
     var menuOpen by remember { mutableStateOf(false) }
     var renaming by remember { mutableStateOf(false) }
     var deleting by remember { mutableStateOf(false) }
+    // System photo picker: no storage permission needed. The picture is copied into the app (see PlaylistCoverStore).
+    val coverPicker = androidx.activity.compose.rememberLauncherForActivityResult(
+        androidx.activity.result.contract.ActivityResultContracts.PickVisualMedia(),
+    ) { uri -> if (uri != null) viewModel.setPlaylistCover(screen.id, uri) }
     val list = tracks.orEmpty()
     val name = playlist?.name.orEmpty()
+
+    // "Edit order" mode: rows get a drag handle (and a remove button); everything else is as in a normal list.
+    var editing by remember { mutableStateOf(false) }
+    val listState = androidx.compose.foundation.lazy.rememberLazyListState()
+    var local by remember { mutableStateOf<List<com.localplayer.music.data.db.TrackListItem>?>(null) }
+    var draggedId by remember { mutableStateOf<Long?>(null) }
+    var dragDelta by androidx.compose.runtime.remember { androidx.compose.runtime.mutableFloatStateOf(0f) }
+    val haptics = com.localplayer.music.ui.theme.rememberHaptics()
+    val listNow by androidx.compose.runtime.rememberUpdatedState(list)
+    // The stored order changed (our own move arriving, or any other change): the drag preview is dropped.
+    androidx.compose.runtime.LaunchedEffect(tracks) { local = null; draggedId = null; dragDelta = 0f }
+    val shown = local ?: list
+
+    fun swapIfNeeded() {
+        val id = draggedId ?: return
+        val current = local ?: return
+        val items = listState.layoutInfo.visibleItemsInfo
+        val dragged = items.firstOrNull { it.key == id } ?: return
+        val center = dragged.offset + dragged.size / 2f + dragDelta
+        val target = items.firstOrNull { it.key != id && center >= it.offset && center < it.offset + it.size } ?: return
+        val from = current.indexOfFirst { it.id == id }
+        val to = current.indexOfFirst { it.id == target.key }
+        if (from < 0 || to < 0 || from == to) return
+        val mutable = current.toMutableList()
+        mutable.add(to, mutable.removeAt(from))
+        local = mutable
+        haptics.tick()
+        val newOffset = if (to > from) target.offset + target.size - dragged.size else target.offset
+        dragDelta += dragged.offset - newOffset
+    }
+
+    fun finishDrag() {
+        val id = draggedId
+        val preview = local
+        if (id != null && preview != null) {
+            val from = listNow.indexOfFirst { it.id == id }
+            val to = preview.indexOfFirst { it.id == id }
+            if (from >= 0 && to >= 0 && from != to) {
+                // The preview stays on screen until the stored order arrives (LaunchedEffect(tracks) above).
+                viewModel.movePlaylistTrack(screen.id, listNow[from].uri, listNow[to].uri)
+            } else {
+                local = null
+            }
+        }
+        draggedId = null
+        dragDelta = 0f
+    }
+
+    // Scrolls while a row is held near the top or bottom edge (steady speed on every refresh rate).
+    androidx.compose.runtime.LaunchedEffect(draggedId) {
+        if (draggedId == null) return@LaunchedEffect
+        var last = androidx.compose.runtime.withFrameNanos { it }
+        while (kotlinx.coroutines.currentCoroutineContext().isActive) {
+            val frame = androidx.compose.runtime.withFrameNanos { it }
+            val ticks = ((frame - last) / 16_000_000f).coerceIn(0f, 3f)
+            last = frame
+            val id = draggedId ?: break
+            val info = listState.layoutInfo
+            val dragged = info.visibleItemsInfo.firstOrNull { it.key == id }
+            if (dragged != null) {
+                val center = dragged.offset + dragged.size / 2f + dragDelta
+                val zone = 96f
+                val speed = when {
+                    center < info.viewportStartOffset + zone -> -(info.viewportStartOffset + zone - center) / 4f
+                    center > info.viewportEndOffset - zone -> (center - (info.viewportEndOffset - zone)) / 4f
+                    else -> 0f
+                }
+                if (speed != 0f) {
+                    dragDelta += listState.scrollBy(speed * ticks)
+                    swapIfNeeded()
+                }
+            }
+        }
+    }
 
     Box(Modifier.fillMaxSize()) {
     Column(Modifier.fillMaxSize()) {
@@ -140,6 +231,29 @@ fun PlaylistScreen(screen: Screen.Playlist, nav: NavState, viewModel: LibraryVie
                         Icon(AppIcons.MoreVert, contentDescription = stringResource(R.string.more_options))
                     }
                     DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
+                        if (list.size > 1 || editing) {
+                            DropdownMenuItem(
+                                text = { Text(stringResource(if (editing) R.string.done_editing_order else R.string.edit_order)) },
+                                onClick = { menuOpen = false; editing = !editing },
+                            )
+                        }
+                        DropdownMenuItem(
+                            text = { Text(stringResource(R.string.edit_playlist_cover)) },
+                            onClick = {
+                                menuOpen = false
+                                coverPicker.launch(
+                                    androidx.activity.result.PickVisualMediaRequest(
+                                        androidx.activity.result.contract.ActivityResultContracts.PickVisualMedia.ImageOnly,
+                                    ),
+                                )
+                            },
+                        )
+                        if (playlist?.coverFile != null) {
+                            DropdownMenuItem(
+                                text = { Text(stringResource(R.string.remove_playlist_cover)) },
+                                onClick = { menuOpen = false; viewModel.removePlaylistCover(screen.id) },
+                            )
+                        }
                         DropdownMenuItem(
                             text = { Text(stringResource(R.string.rename)) },
                             onClick = { menuOpen = false; renaming = true },
@@ -158,21 +272,36 @@ fun PlaylistScreen(screen: Screen.Playlist, nav: NavState, viewModel: LibraryVie
                 }
             },
         )
-        LazyColumn(Modifier.fillMaxSize(), contentPadding = barPadding(extra = 16.dp)) {
+        FadingLazyColumn(Modifier.fillMaxSize(), state = listState, contentPadding = barPadding(extra = 16.dp)) {
             item(key = "hero") {
                 DetailHero(
                     title = name,
                     subtitle = songCountText(playlist?.trackCount ?: 0) + " • " +
                         formatDuration(playlist?.totalDurationMs ?: 0L),
                     artwork = artwork.firstOrNull(),
-                    cover = { ArtworkCollage(artwork, Modifier.size(200.dp)) },
+                    cover = {
+                        val own = playlist?.coverFile
+                        if (own != null) {
+                            com.localplayer.music.ui.components.PlaylistCoverImage(
+                                own,
+                                Modifier.size(200.dp).clip(androidx.compose.foundation.shape.RoundedCornerShape(16.dp)),
+                            )
+                        } else {
+                            ArtworkCollage(artwork, Modifier.size(200.dp))
+                        }
+                    },
                     onPlay = { viewModel.playAll(list, shuffle = false) },
                     onShuffle = { viewModel.playAll(list, shuffle = true) },
                 )
             }
             item(key = "buttons") {
                 val linked = playlist
-                if (linked != null && linked.isFolderLinked) {
+                if (editing) {
+                    Button(
+                        onClick = { editing = false },
+                        modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp),
+                    ) { Text(stringResource(R.string.done_editing_order)) }
+                } else if (linked != null && linked.isFolderLinked) {
                     // A playlist that mirrors a folder is edited by changing the folder (or by unlinking it).
                     FolderLinkBanner(linked)
                 } else {
@@ -189,32 +318,49 @@ fun PlaylistScreen(screen: Screen.Playlist, nav: NavState, viewModel: LibraryVie
             if (tracks != null && list.isEmpty()) {
                 item(key = "empty") { EmptyState(stringResource(R.string.empty_playlist_tracks)) }
             }
-            items(list.size, key = { list[it].id }) { index ->
-                val song = list[index]
-                TrackRow(
-                    song = song,
-                    isCurrent = song.id == currentId,
-                    onClick = { viewModel.playFrom(list, index) },
-                    actions = menu.actionsFor(
-                        song,
+            items(shown.size, key = { shown[it].id }) { index ->
+                val song = shown[index]
+                if (editing) {
+                    val dragged = draggedId == song.id
+                    ReorderRow(
+                        song = song,
+                        dragged = dragged,
+                        dragOffset = { dragDelta },
+                        modifier = if (dragged) Modifier else Modifier.animateItem(),
                         onRemove = if (playlist?.isFolderLinked == true) {
                             null
                         } else {
                             { viewModel.removeFromPlaylist(screen.id, song.uri) }
                         },
                         removeLabel = stringResource(R.string.remove_from_playlist, name),
-                    ),
-                    onMoveUp = if (index > 0) {
-                        { viewModel.movePlaylistTrack(screen.id, song.uri, list[index - 1].uri) }
-                    } else {
-                        null
-                    },
-                    onMoveDown = if (index < list.lastIndex) {
-                        { viewModel.movePlaylistTrack(screen.id, song.uri, list[index + 1].uri) }
-                    } else {
-                        null
-                    },
-                )
+                        onDragStart = {
+                            haptics.pickUp()
+                            dragDelta = 0f
+                            local = listNow
+                            draggedId = song.id
+                        },
+                        onDrag = { amount ->
+                            dragDelta += amount
+                            swapIfNeeded()
+                        },
+                        onDragEnd = {
+                            haptics.drop()
+                            finishDrag()
+                        },
+                        onDragCancel = {
+                            local = null
+                            draggedId = null
+                            dragDelta = 0f
+                        },
+                    )
+                } else {
+                    TrackRow(
+                        song = song,
+                        isCurrent = song.id == currentId,
+                        onClick = { viewModel.playFrom(list, index) },
+                        actions = menu.actionsFor(song),
+                    )
+                }
             }
         }
     }
@@ -273,7 +419,7 @@ fun AddTracksScreen(screen: Screen.AddTracks, nav: NavState, viewModel: LibraryV
             placeholder = { Text(stringResource(R.string.search_hint)) },
             modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp),
         )
-        LazyColumn(Modifier.weight(1f)) {
+        FadingLazyColumn(Modifier.weight(1f)) {
             items(visible, key = { it.id }) { song ->
                 val already = song.uri in existing
                 val checked = already || song.uri in selected
@@ -318,3 +464,69 @@ fun AddTracksScreen(screen: Screen.AddTracks, nav: NavState, viewModel: LibraryV
         }
     }
 }
+
+/** A playlist row in "Edit order" mode: artwork, name, a remove button and a three-line drag handle. */
+@Composable
+private fun ReorderRow(
+    song: com.localplayer.music.data.db.TrackListItem,
+    dragged: Boolean,
+    dragOffset: () -> Float,
+    modifier: Modifier,
+    onRemove: (() -> Unit)?,
+    removeLabel: String,
+    onDragStart: () -> Unit,
+    onDrag: (Float) -> Unit,
+    onDragEnd: () -> Unit,
+    onDragCancel: () -> Unit,
+) {
+    val surface = MaterialTheme.colorScheme.surfaceContainerHigh
+    val unknownArtist = stringResource(R.string.unknown_artist)
+    val reorderDescription = stringResource(R.string.reorder_playlist_item, song.title)
+    Row(
+        modifier = modifier
+            .zIndex(if (dragged) 1f else 0f)
+            .graphicsLayer { translationY = if (dragged) dragOffset() else 0f; shadowElevation = if (dragged) 6.dp.toPx() else 0f }
+            .fillMaxWidth()
+            .padding(horizontal = 12.dp, vertical = 3.dp)
+            .clip(androidx.compose.foundation.shape.RoundedCornerShape(18.dp))
+            .background(if (dragged) surface else MaterialTheme.colorScheme.surfaceContainerLow)
+            .padding(start = 10.dp, top = 6.dp, bottom = 6.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        ArtworkImage(artwork = song.artworkRef(), size = 44.dp)
+        Spacer(Modifier.width(12.dp))
+        Column(Modifier.weight(1f)) {
+            Text(song.title, style = MaterialTheme.typography.bodyLarge, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            Text(
+                song.artist ?: unknownArtist,
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+        }
+        if (onRemove != null) {
+            IconButton(onClick = onRemove) { Icon(AppIcons.Close, contentDescription = removeLabel) }
+        }
+        Box(
+            modifier = Modifier
+                .size(48.dp)
+                .pointerInput(song.id) {
+                    detectDragGestures(
+                        onDragStart = { onDragStart() },
+                        onDrag = { change, amount ->
+                            change.consume()
+                            onDrag(amount.y)
+                        },
+                        onDragEnd = { onDragEnd() },
+                        onDragCancel = { onDragCancel() },
+                    )
+                }
+                .semantics { contentDescription = reorderDescription },
+            contentAlignment = Alignment.Center,
+        ) {
+            Icon(AppIcons.DragHandle, contentDescription = null, tint = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.size(24.dp))
+        }
+    }
+}
+

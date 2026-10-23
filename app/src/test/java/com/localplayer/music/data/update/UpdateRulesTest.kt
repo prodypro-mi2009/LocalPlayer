@@ -19,6 +19,21 @@ class UpdateRulesTest {
         assertTrue(VersionCompare.isNewer("1.0.10", "1.0.9"))
     }
 
+    @Test fun trailingBuildLabelLettersAreIgnoredForOrdering() {
+        assertTrue(VersionCompare.isValid("1.0.9ap"))
+        assertTrue(VersionCompare.isValid("1.0.9ap-rc1"))
+        assertTrue(VersionCompare.isNewer("1.0.10", "1.0.9ap"))
+        assertFalse(VersionCompare.isNewer("1.0.9", "1.0.9ap"))
+        assertFalse(VersionCompare.isValid("1.0.ap"))
+        assertFalse(VersionCompare.isValid("ap"))
+        assertFalse(VersionCompare.isValid("1.a.9"))
+        // the new beta label: a pre-release of 1.1.1, older than the final 1.1.1, newer than 1.1.0
+        assertTrue(VersionCompare.isValid("v1.1.1-newbeta"))
+        assertTrue(VersionCompare.isNewer("1.1.1", "1.1.1-newbeta"))
+        assertTrue(VersionCompare.isNewer("1.1.2", "1.1.1-newbeta"))
+        assertTrue(VersionCompare.isNewer("1.1.1-newbeta", "1.1.0"))
+    }
+
     @Test fun onlyGithubReleaseDownloadsAreAllowed() {
         assertTrue(UpdateRules.isAllowedDownloadUrl("https://github.com/me/LocalPlayer/releases/download/v1.0.1/app-release.apk"))
         assertFalse(UpdateRules.isAllowedDownloadUrl("http://github.com/me/LocalPlayer/releases/download/v1/a.apk"))

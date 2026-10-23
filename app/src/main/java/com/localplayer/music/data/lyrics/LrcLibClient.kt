@@ -1,6 +1,7 @@
 package com.localplayer.music.data.lyrics
 
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
 import org.json.JSONArray
 import org.json.JSONObject
@@ -33,36 +34,59 @@ class LrcLibClient(private val userAgent: String) {
     suspend fun search(title: String, artist: String?, album: String?, durationMs: Long): Outcome = withContext(Dispatchers.IO) {
         val found = LinkedHashMap<Long, LrcLibResult>()
 
-        // 1) exact lookup, when everything it needs is known
+        // 1) exact lookup, when everything it needs is known. It is only a shortcut: a server error or a network
+        //    problem here must NOT end the search, the normal search below is tried anyway.
         if (!album.isNullOrBlank() && !artist.isNullOrBlank() && durationMs > 0) {
-            val q = "track_name=${enc(title)}&artist_name=${enc(artist)}&album_name=${enc(album)}&duration=${(durationMs / 1000.0).toInt()}"
+            val q = "track_name=${enc(title)}&artist_name=${enc(artist)}&album_name=${enc(album)}&duration=${Math.round(durationMs / 1000.0)}"
             when (val r = get("$BASE/get?$q")) {
                 is Http.Ok -> parseObject(r.body)?.let { found[it.id] = it }
-                Http.NotFound -> Unit
                 Http.Limited -> return@withContext Outcome.RateLimited
-                is Http.Failed -> return@withContext Outcome.ServerError(r.code)
-                Http.Network -> return@withContext Outcome.NetworkError
+                Http.NotFound, is Http.Failed, Http.Network -> Unit
             }
         }
 
-        // 2) search by title (+ artist)
-        val q = buildString {
+        // 2) search by title (+ artist); if that request fails on the server side, a free-text query is tried once.
+        val byFields = buildString {
             append("track_name=").append(enc(title))
             if (!artist.isNullOrBlank()) append("&artist_name=").append(enc(artist))
         }
-        when (val r = get("$BASE/search?$q")) {
-            is Http.Ok -> parseArray(r.body).forEach { found.putIfAbsent(it.id, it) }
-            Http.NotFound -> Unit
-            Http.Limited -> return@withContext Outcome.RateLimited
-            is Http.Failed -> return@withContext Outcome.ServerError(r.code)
-            Http.Network -> if (found.isEmpty()) return@withContext Outcome.NetworkError
+        var failure: Outcome? = null
+        val clean = LrcLibMatcher.cleanTitle(title)
+        val queries = buildList {
+            add(byFields)
+            add("q=" + enc(listOfNotNull(title, artist?.takeIf { it.isNotBlank() }).joinToString(" ")))
+            // Titles like "Song (feat. X)" or "Song [Remastered]" often exist on LRCLIB without that suffix.
+            if (clean != title.trim()) add("q=" + enc(listOfNotNull(clean, artist?.takeIf { it.isNotBlank() }).joinToString(" ")))
         }
+        for (query in queries) {
+            when (val r = get("$BASE/search?$query")) {
+                is Http.Ok -> { parseArray(r.body).forEach { found.putIfAbsent(it.id, it) }; failure = null }
+                Http.NotFound -> failure = null
+                Http.Limited -> return@withContext Outcome.RateLimited
+                is Http.Failed -> failure = Outcome.ServerError(r.code)
+                Http.Network -> failure = Outcome.NetworkError
+            }
+            // Stop when this query worked and gave something, or failed in a way a second query cannot fix.
+            if (failure == null && found.isNotEmpty()) break
+            if (failure == Outcome.NetworkError) break
+        }
+        if (found.isEmpty() && failure != null) return@withContext failure
         Outcome.Found(found.values.toList())
     }
 
     private fun enc(s: String) = URLEncoder.encode(s, "UTF-8")
 
-    private fun get(url: String): Http {
+    /** One request; a temporary server error (5xx, LRCLIB is sometimes overloaded) is retried once after a short pause. */
+    private suspend fun get(url: String): Http {
+        val first = getOnce(url)
+        if (first is Http.Failed && first.code in 500..599) {
+            delay(RETRY_DELAY_MS)
+            return getOnce(url)
+        }
+        return first
+    }
+
+    private fun getOnce(url: String): Http {
         var connection: HttpURLConnection? = null
         return try {
             connection = (URL(url).openConnection() as HttpURLConnection).apply {
@@ -131,5 +155,6 @@ class LrcLibClient(private val userAgent: String) {
         const val CONNECT_TIMEOUT_MS = 8_000
         const val READ_TIMEOUT_MS = 10_000
         const val MAX_CHARS = 2_000_000
+        const val RETRY_DELAY_MS = 700L
     }
 }

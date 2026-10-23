@@ -2,6 +2,8 @@ package com.localplayer.music.playback
 
 import android.content.ComponentName
 import android.content.Context
+import android.os.Handler
+import android.os.Looper
 import androidx.core.content.ContextCompat
 import androidx.media3.common.C
 import androidx.media3.common.MediaItem
@@ -12,8 +14,11 @@ import com.google.common.util.concurrent.ListenableFuture
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlin.coroutines.cancellation.CancellationException
 import kotlin.coroutines.resume
-import kotlin.coroutines.suspendCoroutine
+import kotlin.coroutines.resumeWithException
+import kotlinx.coroutines.suspendCancellableCoroutine
+import kotlin.random.Random
 
 data class NowPlaying(
     val mediaId: String,
@@ -49,16 +54,31 @@ data class QueueEntry(
 )
 
 /**
- * UI-side handle to the playback service. Must be used from the main thread.
+ * UI-side handle to the playback service. Must be used from the main thread (calls from other threads are
+ * posted to it, so the controller is only ever touched on its application thread).
  * The controller is connected while the UI is visible and released when it is not;
  * playback itself lives in [PlaybackService] and is unaffected.
+ *
+ * Connection lifecycle ([ControllerLifecycle]): commands issued before the controller is connected wait; if the
+ * connection is released, replaced or fails they are CANCELLED (suspending callers get a CancellationException,
+ * fire-and-forget commands are dropped), never left suspended and never run against a later controller.
  */
 class PlayerConnection(private val context: Context) {
 
-    private var controller: MediaController? = null
+    private val lifecycle = ControllerLifecycle<MediaController>()
     private var future: ListenableFuture<MediaController>? = null
-    private val pending = ArrayList<(MediaController) -> Unit>()
     private var lastPositionMs = 0L
+    private val mainHandler = Handler(Looper.getMainLooper())
+
+    /** Which entries added to an empty queue were never played (first-item Undo); forgotten on release. */
+    private val startTracker = StartTracker()
+
+    /**
+     * Counts the times the queue received songs (see [QueueEpoch]). A dismiss Undo is only valid while unchanged.
+     */
+    private val epoch = QueueEpoch()
+
+    private val controller: MediaController? get() = lifecycle.current
 
     private val _state = MutableStateFlow(PlayerState())
     val state: StateFlow<PlayerState> = _state.asStateFlow()
@@ -71,15 +91,36 @@ class PlayerConnection(private val context: Context) {
     val positionJumps: StateFlow<Int> = _positionJumps.asStateFlow()
 
     private val listener = object : Player.Listener {
+        override fun onTimelineChanged(timeline: androidx.media3.common.Timeline, reason: Int) {
+            if (reason == Player.TIMELINE_CHANGE_REASON_PLAYLIST_CHANGED) epoch.onPlaylistChanged(timeline.windowCount)
+        }
+
         override fun onEvents(player: Player, events: Player.Events) {
             if (events.contains(Player.EVENT_POSITION_DISCONTINUITY)) _positionJumps.value++
             if (events.contains(Player.EVENT_TIMELINE_CHANGED)) publishQueue(player)
+            if (events.containsAny(
+                    Player.EVENT_IS_PLAYING_CHANGED,
+                    Player.EVENT_PLAY_WHEN_READY_CHANGED,
+                    Player.EVENT_MEDIA_ITEM_TRANSITION,
+                ) && (player.isPlaying || player.playWhenReady)
+            ) {
+                markStarted(player)
+            }
             publishState(player)
         }
     }
 
+    private fun markStarted(player: Player) {
+        startTracker.onPlaybackStarted(player.currentMediaItem?.let { MediaItemFactory.occurrenceId(it) })
+    }
+
     fun connect() {
-        if (future != null) return
+        runOnMain { connectOnMain() }
+    }
+
+    private fun connectOnMain() {
+        val attempt = lifecycle.beginConnect()
+        if (attempt < 0) return
         val token = SessionToken(context, ComponentName(context, PlaybackService::class.java))
         val pendingFuture = MediaController.Builder(context, token).buildAsync()
         future = pendingFuture
@@ -89,50 +130,79 @@ class PlayerConnection(private val context: Context) {
                     pendingFuture.get()
                 } catch (e: Exception) {
                     if (future === pendingFuture) future = null
+                    lifecycle.failed(attempt) // waiting commands are cancelled; an older attempt is ignored
                     return@Runnable
                 }
-                if (future !== pendingFuture) {
-                    MediaController.releaseFuture(pendingFuture)
-                    return@Runnable
+                val accepted = lifecycle.connected(attempt, connected) { c ->
+                    c.addListener(listener)
+                    publishQueue(c)
+                    publishState(c)
                 }
-                controller = connected
-                connected.addListener(listener)
-                publishQueue(connected)
-                publishState(connected)
-                val actions = pending.toList()
-                pending.clear()
-                actions.forEach { it(connected) }
+                if (!accepted) MediaController.releaseFuture(pendingFuture) // released or replaced meanwhile
             },
             ContextCompat.getMainExecutor(context),
         )
     }
 
     fun release() {
-        controller?.let {
-            lastPositionMs = it.currentPosition
-            it.removeListener(listener)
+        runOnMain {
+            controller?.let {
+                lastPositionMs = it.currentPosition
+                it.removeListener(listener)
+            }
+            lifecycle.release() // cancels every command still waiting
+            future?.let { MediaController.releaseFuture(it) }
+            future = null
+            startTracker.clear()
         }
-        future?.let { MediaController.releaseFuture(it) }
-        controller = null
-        future = null
     }
 
+    private fun runOnMain(block: () -> Unit) {
+        if (Looper.myLooper() == Looper.getMainLooper()) block() else mainHandler.post(block)
+    }
+
+    private fun submit(command: Command<MediaController>) {
+        if (!lifecycle.submit(command)) connectOnMain()
+    }
+
+    /** Fire-and-forget command: runs when connected, is dropped if the connection is abandoned first. */
     private fun withController(action: (MediaController) -> Unit) {
-        val current = controller
-        if (current != null) {
-            action(current)
-        } else {
-            pending.add(action)
-            connect()
-        }
+        runOnMain { submit(Command(onRun = { action(it) }, onCancel = {})) }
+    }
+
+    /**
+     * Command with a result. Cancellation-safe: if the caller is cancelled the command is discarded and never
+     * runs; if the connection is abandoned the caller is cancelled; the continuation is resumed exactly once.
+     */
+    private suspend fun <T> request(op: (MediaController) -> T): T = suspendCancellableCoroutine { cont ->
+        val command = Command<MediaController>(
+            onRun = { c ->
+                if (cont.isActive) {
+                    try {
+                        cont.resume(op(c))
+                    } catch (t: Throwable) {
+                        cont.resumeWithException(t)
+                    }
+                }
+            },
+            onCancel = { cont.cancel(CancellationException("Player connection released")) },
+        )
+        cont.invokeOnCancellation { runOnMain { lifecycle.discard(command) } }
+        runOnMain { submit(command) }
     }
 
     // --- Commands ------------------------------------------------------------------------
 
-    fun playQueue(items: List<MediaItem>, startIndex: Int) = withController {
-        it.setMediaItems(items, startIndex, 0L)
+    /**
+     * Starts a new queue (tap a song, Play all, Shuffle all). Follows the Shuffle switch, see [QueueOps.replaceQueue];
+     * [forceShuffle] (Shuffle all) turns the switch on, so the icon always matches the real order.
+     */
+    fun playQueue(items: List<MediaItem>, startIndex: Int, forceShuffle: Boolean = false) = withController {
+        startTracker.clear()
+        QueueOps.replaceQueue(it, items, startIndex, forceShuffle)
         it.prepare()
         it.play()
+        markStarted(it)
     }
 
     fun togglePlayPause() = withController {
@@ -142,10 +212,20 @@ class PlayerConnection(private val context: Context) {
             if (it.playbackState == Player.STATE_IDLE) it.prepare()
             if (it.playbackState == Player.STATE_ENDED) it.seekToDefaultPosition()
             it.play()
+            markStarted(it) // recorded at command time: a play followed by an instant pause still counts as started
         }
     }
 
-    fun toggleShuffle() = withController { it.shuffleModeEnabled = !it.shuffleModeEnabled }
+    /**
+     * Shuffle on: the upcoming songs are reordered once (Play next songs stay first). Shuffle off: they go back
+     * to the order they had before, unless the user reordered by hand meanwhile. Either way the queue shows, and
+     * plays, one single order.
+     */
+    fun toggleShuffle() = withController {
+        val turnOn = !it.shuffleModeEnabled
+        QueueOps.reorderUpcoming(it, turnOn)
+        it.shuffleModeEnabled = turnOn
+    }
 
     /** off -> all -> one -> off */
     fun cycleRepeat() = withController {
@@ -169,11 +249,15 @@ class PlayerConnection(private val context: Context) {
     fun playQueueIndex(index: Int) = withController {
         if (index !in 0 until it.mediaItemCount) return@withController
         if (index == it.currentMediaItemIndex) {
-            if (!it.isPlaying && !it.playWhenReady) it.play()
+            if (!it.isPlaying && !it.playWhenReady) {
+                it.play()
+                markStarted(it)
+            }
         } else {
             it.seekToDefaultPosition(index)
             it.prepare()
             it.play()
+            markStarted(it)
         }
     }
 
@@ -184,15 +268,13 @@ class PlayerConnection(private val context: Context) {
      * Removes ONE queue entry with `removeMediaItem` only: no prepare / stop / seek / playWhenReady change,
      * so the current track keeps playing without a gap when it is not the removed one.
      */
-    suspend fun removeQueueItem(index: Int): RemovedItem? = suspendCoroutine { continuation ->
-        withController { c ->
-            if (index !in 0 until c.mediaItemCount) {
-                continuation.resume(null)
-            } else {
-                val item = MediaItemFactory.playable(c.getMediaItemAt(index))
-                c.removeMediaItem(index)
-                continuation.resume(item?.let { RemovedItem(index, it) })
-            }
+    suspend fun removeQueueItem(index: Int): RemovedItem? = request { c ->
+        if (index !in 0 until c.mediaItemCount) {
+            null
+        } else {
+            val item = MediaItemFactory.playable(c.getMediaItemAt(index))
+            c.removeMediaItem(index)
+            item?.let { RemovedItem(index, it) }
         }
     }
 
@@ -200,44 +282,39 @@ class PlayerConnection(private val context: Context) {
      * Removes the queue entry with this occurrence id (so a reorder that happened in the meantime can never make
      * the wrong row disappear). Same guarantees as [removeQueueItem]: only `removeMediaItem` is called.
      */
-    suspend fun removeQueueEntry(occurrenceId: String): RemovedItem? = suspendCoroutine { continuation ->
-        withController { c ->
-            val index = (0 until c.mediaItemCount).indexOfFirst { MediaItemFactory.occurrenceId(c.getMediaItemAt(it)) == occurrenceId }
-            if (index < 0) {
-                continuation.resume(null)
-            } else {
-                val item = MediaItemFactory.playable(c.getMediaItemAt(index))
-                c.removeMediaItem(index)
-                continuation.resume(item?.let { RemovedItem(index, it) })
-            }
+    suspend fun removeQueueEntry(occurrenceId: String): RemovedItem? = request { c ->
+        val index = (0 until c.mediaItemCount).indexOfFirst { MediaItemFactory.occurrenceId(c.getMediaItemAt(it)) == occurrenceId }
+        if (index < 0) {
+            null
+        } else {
+            val item = MediaItemFactory.playable(c.getMediaItemAt(index))
+            c.removeMediaItem(index)
+            item?.let { RemovedItem(index, it) }
         }
     }
 
     /**
      * Moves the entry with this occurrence id to position [to] with ONE `moveMediaItem`. Media3 keeps the current
      * item playing (no restart, no seek) and adjusts the current index itself, also when the moved entry is the
-     * playing one or passes it.
+     * playing one or passes it. With Shuffle on this also drops the shuffle ranks (see [QueueOps.moveEntry]).
      */
     fun moveQueueEntry(occurrenceId: String, to: Int) = withController { c ->
-        val from = (0 until c.mediaItemCount).indexOfFirst { MediaItemFactory.occurrenceId(c.getMediaItemAt(it)) == occurrenceId }
-        if (from >= 0 && to in 0 until c.mediaItemCount && from != to) c.moveMediaItem(from, to)
+        QueueOps.moveEntry(c, occurrenceId, to)
     }
 
     /**
      * Removes every queue entry of one track (hiding a song). Highest index first, with `removeMediaItem` only; if
      * the playing entry is among them Media3 continues with the next entry (or ends when there is none).
      */
-    suspend fun removeAllOfTrack(trackUri: String): Int = suspendCoroutine { continuation ->
-        withController { c ->
-            var removed = 0
-            for (i in c.mediaItemCount - 1 downTo 0) {
-                if (MediaItemFactory.trackUri(c.getMediaItemAt(i)) == trackUri) {
-                    c.removeMediaItem(i)
-                    removed++
-                }
+    suspend fun removeAllOfTrack(trackUri: String): Int = request { c ->
+        var removed = 0
+        for (i in c.mediaItemCount - 1 downTo 0) {
+            if (MediaItemFactory.trackUri(c.getMediaItemAt(i)) == trackUri) {
+                c.removeMediaItem(i)
+                removed++
             }
-            continuation.resume(removed)
         }
+        removed
     }
 
     /** Puts a removed entry back (pure insert; the current track is not touched). */
@@ -246,62 +323,23 @@ class PlayerConnection(private val context: Context) {
     }
 
     /**
-     * Removes everything after the current track in ONE operation. The current track keeps playing
-     * untouched. Returns what was removed (for Undo) or an empty list.
+     * Clear upcoming: removes what would play after the current track in ONE operation (with Repeat ALL also the
+     * songs it would wrap to). The current track keeps playing untouched. Null when there was nothing to clear.
      */
-    suspend fun clearUpcoming(): List<RemovedItem> = suspendCoroutine { continuation ->
-        withController { c ->
-            val first = c.currentMediaItemIndex + 1
-            val count = c.mediaItemCount
-            if (c.currentMediaItemIndex < 0 || first >= count) {
-                continuation.resume(emptyList())
-            } else {
-                val removed = (first until count).mapNotNull { i ->
-                    MediaItemFactory.playable(c.getMediaItemAt(i))?.let { RemovedItem(i, it) }
-                }
-                c.removeMediaItems(first, count)
-                continuation.resume(removed)
-            }
-        }
-    }
+    suspend fun clearUpcoming(): QueueOps.Cleared? = request { c -> QueueOps.clearUpcoming(c) }
 
-    /** Puts the entries removed by [clearUpcoming] back at the end, in their original order. */
-    fun reinsertAll(removed: List<RemovedItem>) = withController {
-        if (removed.isNotEmpty()) it.addMediaItems(removed.map(RemovedItem::item))
-    }
+    /**
+     * Queue screen "Clear": keeps ONLY the current song, untouched (same item, position and play state; no stop,
+     * no clearMediaItems, no setMediaItems). Null when there was nothing else to clear.
+     */
+    suspend fun clearQueueExceptCurrent(): QueueOps.Cleared? = request { c -> QueueOps.clearExceptCurrent(c) }
+
+    /** Undo of either Clear; false (and nothing changed) when the queue is no longer what the Clear left. */
+    suspend fun undoClearQueue(cleared: QueueOps.Cleared): Boolean = request { c -> QueueOps.undoClear(c, cleared) }
 
     fun moveQueueItem(from: Int, to: Int) = withController {
         val count = it.mediaItemCount
         if (from in 0 until count && to in 0 until count && from != to) it.moveMediaItem(from, to)
-    }
-
-    /** Appends to the end of the queue (starts playing if nothing is queued yet). */
-    fun addToQueue(items: List<MediaItem>) = withController {
-        if (it.mediaItemCount == 0) {
-            it.setMediaItems(items)
-            it.prepare()
-            it.play()
-        } else {
-            it.addMediaItems(items)
-        }
-    }
-
-    /**
-     * Inserts right after the current track AND after everything already queued with Play next, so
-     * "Play next D", "Play next E" on current A gives A, D, E (not A, E, D). Starts playing if
-     * nothing is queued yet.
-     */
-    fun playNext(items: List<MediaItem>) = withController { c ->
-        if (c.mediaItemCount == 0) {
-            c.setMediaItems(items)
-            c.prepare()
-            c.play()
-        } else {
-            val at = PlayNextOrder.insertIndex(c.currentMediaItemIndex, c.mediaItemCount) { i ->
-                MediaItemFactory.isPlayNext(c.getMediaItemAt(i))
-            }
-            c.addMediaItems(at, items.map(MediaItemFactory::markPlayNext))
-        }
     }
 
     // --- Editing the file of a queued track -------------------------------------------------
@@ -313,23 +351,21 @@ class PlayerConnection(private val context: Context) {
      * Call before the audio file is rewritten. If it is the current track it is paused, so the
      * player is not reading the file while its bytes change.
      */
-    suspend fun beginFileEdit(mediaId: String): EditHandle? = suspendCoroutine { continuation ->
-        withController { c ->
-            var handle: EditHandle? = null
-            for (i in 0 until c.mediaItemCount) {
-                if (c.getMediaItemAt(i).mediaId == mediaId) {
-                    val current = i == c.currentMediaItemIndex
-                    handle = EditHandle(
-                        wasCurrent = current,
-                        positionMs = if (current) c.currentPosition else 0L,
-                        wasPlaying = current && (c.isPlaying || c.playWhenReady),
-                    )
-                    if (current) c.pause()
-                    break
-                }
+    suspend fun beginFileEdit(mediaId: String): EditHandle? = request { c ->
+        var handle: EditHandle? = null
+        for (i in 0 until c.mediaItemCount) {
+            if (c.getMediaItemAt(i).mediaId == mediaId) {
+                val current = i == c.currentMediaItemIndex
+                handle = EditHandle(
+                    wasCurrent = current,
+                    positionMs = if (current) c.currentPosition else 0L,
+                    wasPlaying = current && (c.isPlaying || c.playWhenReady),
+                )
+                if (current) c.pause()
+                break
             }
-            continuation.resume(handle)
         }
+        handle
     }
 
     /**
@@ -356,100 +392,82 @@ class PlayerConnection(private val context: Context) {
         }
     }
 
-    // --- Queue snapshot / undo ---------------------------------------------------------------
+    // --- Mini-player dismiss / Undo ---------------------------------------------------------
 
-    /** The whole queue, the current index and position, so a destructive action can be undone. */
+    /**
+     * The whole queue, current index and position, so the dismissal can be undone. [epoch] ties it to the queue
+     * state right after the dismissal: the Undo is refused if the queue received songs since.
+     */
     data class QueueSnapshot(
         val items: List<MediaItem>,
         val index: Int,
         val positionMs: Long,
         val wasPlaying: Boolean,
+        internal val epoch: Long,
     )
 
-    /** Null when the queue is empty. */
-    suspend fun snapshot(): QueueSnapshot? = suspendCoroutine { continuation ->
-        withController { c ->
-            if (c.mediaItemCount == 0) {
-                continuation.resume(null)
-            } else {
-                val items = (0 until c.mediaItemCount).mapNotNull { MediaItemFactory.playable(c.getMediaItemAt(it)) }
-                continuation.resume(
-                    QueueSnapshot(
-                        items = items,
-                        index = c.currentMediaItemIndex.coerceIn(0, (items.size - 1).coerceAtLeast(0)),
-                        positionMs = c.currentPosition,
-                        wasPlaying = c.isPlaying || c.playWhenReady,
-                    ),
-                )
-            }
-        }
-    }
-
-    fun restore(snapshot: QueueSnapshot) = withController {
-        it.setMediaItems(snapshot.items, snapshot.index, snapshot.positionMs)
-        it.prepare()
-        if (snapshot.wasPlaying) it.play() else it.pause()
-    }
-
     /**
-     * Appends ONE new occurrence of [item] to the end of the queue and returns its occurrence id.
-     * Pure `addMediaItem`: the current item, position and play state are never touched. If nothing is queued
-     * yet the item is only prepared (not played) so the gesture never starts playback by itself.
+     * Mini-player dismiss: takes the snapshot and clears the queue in ONE controller operation (so nothing can
+     * change between the two). Null when the queue was already empty.
      */
-    suspend fun appendOccurrence(item: MediaItem): String = suspendCoroutine { continuation ->
-        withController { c ->
-            val id = QueueOccurrence.newId()
-            val tagged = MediaItemFactory.withOccurrence(item, id)
-            if (c.mediaItemCount == 0) {
-                c.setMediaItems(listOf(tagged))
-                c.prepare()
-            } else {
-                c.addMediaItem(tagged)
-            }
-            continuation.resume(id)
+    suspend fun dismissQueue(): QueueSnapshot? = request { c ->
+        if (c.mediaItemCount == 0) {
+            null
+        } else {
+            val items = (0 until c.mediaItemCount).mapNotNull { MediaItemFactory.playable(c.getMediaItemAt(it)) }
+            val index = c.currentMediaItemIndex.coerceIn(0, (items.size - 1).coerceAtLeast(0))
+            val position = c.currentPosition
+            val wasPlaying = c.isPlaying || c.playWhenReady
+            c.stop()
+            c.clearMediaItems()
+            startTracker.clear()
+            QueueSnapshot(items, index, position, wasPlaying, epoch.value)
         }
     }
 
     /**
-     * Undo of [appendOccurrence]: removes exactly that entry with `removeMediaItem`. No setMediaItems / prepare /
-     * seekTo / stop, so the playing track keeps playing from where it is. Returns true when an entry was removed.
+     * Undo of [dismissQueue]. Checked again here, on the controller thread, immediately before restoring: the
+     * queue must still be empty AND must not have received any song since the dismissal (selecting a song,
+     * adding one, replacing the queue: even if it was removed again). Otherwise nothing changes and false is
+     * returned. A valid Undo restores queue, current song, position and the play/pause state.
      */
-    suspend fun removeOccurrence(occurrenceId: String): Boolean = suspendCoroutine { continuation ->
-        withController { c ->
-            val ids = (0 until c.mediaItemCount).map { MediaItemFactory.occurrenceId(c.getMediaItemAt(it)) }
-            when (val plan = QueueOccurrence.planUndo(ids, c.currentMediaItemIndex, occurrenceId)) {
-                is QueueOccurrence.UndoPlan.Remove -> { c.removeMediaItem(plan.index); continuation.resume(true) }
-                else -> continuation.resume(false)
-            }
+    suspend fun restoreQueue(snapshot: QueueSnapshot): Boolean = request { c ->
+        if (!epoch.canRestoreDismissed(c.mediaItemCount, snapshot.epoch)) {
+            false
+        } else {
+            c.setMediaItems(snapshot.items, snapshot.index, snapshot.positionMs)
+            c.prepare()
+            if (snapshot.wasPlaying) c.play() else c.pause()
+            true
         }
     }
 
     /**
-     * Inserts ONE new occurrence of [item] as the next song (right after the current one, after earlier "Play next"
-     * entries so repeated swipes keep their order) and returns its occurrence id for a targeted Undo.
-     * Pure `addMediaItem`: the current item, position and play state are never touched. If nothing is queued
-     * yet the item is only prepared (not played), like [appendOccurrence].
+     * Appends ONE new occurrence of [item] to the end of the queue and returns its token. Pure `addMediaItem`:
+     * the current item, position and play state are never touched. If nothing is queued yet the item is only
+     * prepared (not played) so the gesture never starts playback by itself.
      */
-    suspend fun insertNextOccurrence(item: MediaItem): String = suspendCoroutine { continuation ->
-        withController { c ->
-            val id = QueueOccurrence.newId()
-            val tagged = MediaItemFactory.markPlayNext(MediaItemFactory.withOccurrence(item, id))
-            if (c.mediaItemCount == 0) {
-                c.setMediaItems(listOf(tagged))
-                c.prepare()
-            } else {
-                val at = PlayNextOrder.insertIndex(c.currentMediaItemIndex, c.mediaItemCount) { i ->
-                    MediaItemFactory.isPlayNext(c.getMediaItemAt(i))
-                }
-                c.addMediaItem(at, tagged)
-            }
-            continuation.resume(id)
-        }
+    suspend fun appendOccurrence(item: MediaItem): QueueOps.Added = request { c ->
+        QueueOps.appendOccurrence(c, item).also { if (it.becameCurrent) startTracker.onAddedToEmptyQueue(it.occurrenceId) }
     }
 
-    fun clearQueue() = withController {
-        it.stop()
-        it.clearMediaItems()
+    /**
+     * Undo of an add: removes exactly that entry with `removeMediaItem`. No setMediaItems / prepare / seekTo /
+     * stop, so the playing track keeps playing from where it is. True when an entry was removed.
+     */
+    suspend fun removeOccurrence(added: QueueOps.Added): Boolean = request { c ->
+        val removed = QueueOps.removeOccurrence(c, added.occurrenceId, startTracker.neverStarted(added.occurrenceId))
+        if (removed) startTracker.forget(added.occurrenceId)
+        removed
+    }
+
+    /**
+     * Inserts ONE new occurrence of [item] as the next song (right after the current one; the newest Play next
+     * plays first) and returns its token for a targeted Undo. Pure `addMediaItem`: the current item, position and
+     * play state are never touched. If nothing is queued yet the item is only prepared (not played).
+     */
+    suspend fun insertNextOccurrence(item: MediaItem): QueueOps.Added = request { c ->
+        QueueOps.insertNextOccurrence(c, item).also { if (it.becameCurrent) startTracker.onAddedToEmptyQueue(it.occurrenceId) }
     }
 
     // --- Position (polled by the UI only while it is visible) -----------------------------
