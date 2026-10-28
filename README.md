@@ -217,11 +217,6 @@ Windows PowerShell:
 "connectedDebugAndroidTest" requires a compatible connected Android device or emulator. The generated debug APK is normally under "app/build/outputs/apk/debug/".
 
 ⚠️ Known beta validation gaps
-
-- The Room database is currently version 8, and the migration chain in code includes "3 → 4 → 5 → 6 → 7 → 8".
-- This source archive includes Room schema exports only for versions 3, 4 and 5. Schemas "6.json", "7.json" and "8.json" are missing, even though the migration test attempts to validate "5 → 6". Therefore the complete migration chain is not fully verifiable from this archive and the relevant migration tests must be repaired/run before a stable release.
-- The release build uses a machine-specific keystore path in "app/build.gradle.kts" and a local, Git-ignored "keystore.properties". Configure signing for your own environment; never commit keystores or passwords.
-- Release lint checks are configured not to abort the build in this snapshot. A successful package task alone should not be treated as a complete quality/security review.
 - This README is based on source inspection of "1.5.0-beta3". A successful Android build, instrumentation run and on-device performance test were not verified as part of this review.
 
 📌 Project status
