@@ -1,9 +1,7 @@
 🎧 LocalPlayer
 
 A local-first, audio-only Android music player built with Kotlin, Jetpack Compose, Material 3, Media3 and Room.
-Download the latest staple version here: https://github.com/prodypro-mi2009/LocalPlayer/releases/download/v.1.4.2/v.1.4.2.apk
-
-«🚧 Current snapshot: "1.5.0-beta3" — pre-release software. Features and migration paths should be tested on real devices before treating this snapshot as a stable release.Download here: https://github.com/prodypro-mi2009/LocalPlayer/releases/download/v.1.5.0-beta3/v.1.5.0-beta3.apk»
+Download the latest staple version here: https://github.com/prodypro-mi2009/LocalPlayer/releases/download/v.1.5.0/v.1.5.0.apk
 
 ---
 
