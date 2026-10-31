@@ -21,6 +21,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.widthIn
@@ -315,19 +316,32 @@ fun AppTopBar(
 fun TopControls(
     onSettings: () -> Unit,
     modifier: Modifier = Modifier,
+    showUpdateDot: Boolean = false,
     leading: @Composable () -> Unit = {},
 ) {
     AppTopBar(
         modifier = modifier,
         leading = { Box(Modifier.weight(1f)) { leading() } },
-        trailing = { SettingsButton(onSettings) },
+        trailing = { SettingsButton(onSettings, showDot = showUpdateDot) },
     )
 }
 
 /** The global Settings button (48dp touch target). */
 @Composable
-fun SettingsButton(onClick: () -> Unit) {
+fun SettingsButton(onClick: () -> Unit, showDot: Boolean = false) {
     IconButton(onClick = onClick, modifier = Modifier.size(TopBarMetrics.ButtonSize)) {
-        Icon(AppIcons.Settings, contentDescription = stringResource(R.string.open_settings_cd))
+        Box {
+            Icon(AppIcons.Settings, contentDescription = stringResource(R.string.open_settings_cd))
+            if (showDot) {
+                // Small red dot at the top right of the gear: a new version was found by the automatic check.
+                Box(
+                    Modifier
+                        .align(Alignment.TopEnd)
+                        .offset(x = 2.dp, y = (-2).dp)
+                        .size(9.dp)
+                        .background(androidx.compose.ui.graphics.Color(0xFFE53935), androidx.compose.foundation.shape.CircleShape),
+                )
+            }
+        }
     }
 }

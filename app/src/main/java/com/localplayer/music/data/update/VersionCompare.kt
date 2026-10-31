@@ -8,7 +8,7 @@ object VersionCompare {
     private class Parsed(val numbers: List<Int>, val preRelease: String?)
 
     private fun parse(text: String): Parsed? {
-        val core = text.trim().removePrefix("v").removePrefix("V")
+        val core = text.trim().removePrefix("v").removePrefix("V").trimStart('.', ' ')   // "v1.5.0", "V.1.5.0", "v.1.5.0"
         if (core.isEmpty() || !core[0].isDigit()) return null
         val cut = core.indexOfFirst { it == '-' || it == '+' || it == ' ' }
         val numbersPart = if (cut >= 0) core.substring(0, cut) else core
@@ -33,8 +33,42 @@ object VersionCompare {
             val b = c.numbers.getOrElse(i) { 0 }
             if (a != b) return a > b
         }
-        // Same numbers: the final release is newer than a pre-release of it.
-        return l.preRelease == null && c.preRelease != null
+        // Same numbers: the final release is newer than any pre-release of it; two pre-releases are ordered
+        // by their label ("beta3" < "beta4" < "beta10" < "rc1").
+        val lp = l.preRelease
+        val cp = c.preRelease
+        return when {
+            lp == null -> cp != null
+            cp == null -> false
+            else -> comparePreRelease(lp, cp) > 0
+        }
+    }
+
+    /** Splits a label into letter runs and number runs: "beta3" -> ["beta", 3]. Numbers sort before words. */
+    private fun tokens(label: String): List<Any> {
+        val out = ArrayList<Any>()
+        Regex("""\d+|[A-Za-z]+""").findAll(label).forEach {
+            val v = it.value
+            out += if (v[0].isDigit()) (v.toLongOrNull() ?: Long.MAX_VALUE) else v.lowercase()
+        }
+        return out
+    }
+
+    internal fun comparePreRelease(a: String, b: String): Int {
+        val x = tokens(a)
+        val y = tokens(b)
+        for (i in 0 until minOf(x.size, y.size)) {
+            val p = x[i]
+            val q = y[i]
+            val c = when {
+                p is Long && q is Long -> p.compareTo(q)
+                p is Long -> -1
+                q is Long -> 1
+                else -> (p as String).compareTo(q as String)
+            }
+            if (c != 0) return c
+        }
+        return x.size.compareTo(y.size)
     }
 }
 
@@ -73,9 +107,9 @@ object UpdateRules {
             ?: apks.firstOrNull()
     }
 
-    const val AUTO_CHECK_INTERVAL_MS = 24L * 60 * 60 * 1000
+    const val AUTO_CHECK_INTERVAL_MS = 7L * 24 * 60 * 60 * 1000
 
-    /** Periodic check: only when enabled, a repository is configured, and at least a day passed since the last check. */
+    /** Periodic check: only when enabled, a repository is configured, and at least a week passed since the last check. */
     fun shouldAutoCheck(enabled: Boolean, repoConfigured: Boolean, nowMs: Long, lastCheckMs: Long): Boolean =
         enabled && repoConfigured && (lastCheckMs <= 0L || nowMs < lastCheckMs || nowMs - lastCheckMs >= AUTO_CHECK_INTERVAL_MS)
 }

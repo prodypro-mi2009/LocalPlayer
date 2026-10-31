@@ -17,12 +17,12 @@ import java.io.File
 class DownloadSink(private val context: Context) {
 
     /** Returns true when the file was stored. [folderTreeUri] null = default location. */
-    fun save(source: File, fileName: String, title: String, artist: String, folderTreeUri: String?): Boolean {
+    fun save(source: File, fileName: String, title: String, artist: String, album: String, folderTreeUri: String?): Boolean {
         val name = "$fileName.mp3"
         return try {
             when {
                 folderTreeUri != null -> saveToTree(source, name, Uri.parse(folderTreeUri))
-                Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q -> saveToMediaStore(source, name, title, artist)
+                Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q -> saveToMediaStore(source, name, title, artist, album)
                 else -> saveToLegacyFolder(source, name)
             }
         } catch (e: Exception) {
@@ -37,7 +37,7 @@ class DownloadSink(private val context: Context) {
         return true
     }
 
-    private fun saveToMediaStore(source: File, name: String, title: String, artist: String): Boolean {
+    private fun saveToMediaStore(source: File, name: String, title: String, artist: String, album: String): Boolean {
         val resolver = context.contentResolver
         val collection = MediaStore.Audio.Media.getContentUri(MediaStore.VOLUME_EXTERNAL_PRIMARY)
         val values = ContentValues().apply {
@@ -46,6 +46,7 @@ class DownloadSink(private val context: Context) {
             put(MediaStore.Audio.Media.RELATIVE_PATH, "${Environment.DIRECTORY_MUSIC}/$FOLDER_NAME")
             put(MediaStore.Audio.Media.TITLE, title)
             if (artist.isNotBlank()) put(MediaStore.Audio.Media.ARTIST, artist)
+            if (album.isNotBlank()) put(MediaStore.Audio.Media.ALBUM, album)
             put(MediaStore.Audio.Media.IS_PENDING, 1)
         }
         val uri = resolver.insert(collection, values) ?: return false

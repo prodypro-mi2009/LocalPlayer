@@ -131,6 +131,18 @@ class MetadataRepository(
         }
     }
 
+    /**
+     * ONE system consent dialog for several songs at once (Android 11+). Returns null when nothing has to be asked
+     * (access already granted, not a MediaStore item, or an older Android where each song asks for itself).
+     */
+    suspend fun bulkWriteConsent(uris: List<Uri>): IntentSender? = withContext(Dispatchers.IO) {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.R) return@withContext null
+        val needing = uris.filter { uri ->
+            FolderKeys.isMediaStoreUri(uri.toString()) && !runCatching { resolver.openFileDescriptor(uri, "rw")?.close() }.isSuccess
+        }
+        if (needing.isEmpty()) null else MediaStore.createWriteRequest(resolver, needing).intentSender
+    }
+
     // --- saving ------------------------------------------------------------------------------
 
     /**
@@ -300,15 +312,15 @@ class MetadataRepository(
                 null,
             )?.use { c -> if (c.moveToFirst()) c.getLong(0) to c.getLong(1) else null }
         } else
-        resolver.query(
-            uri,
-            arrayOf(MediaStore.MediaColumns.DATE_MODIFIED, MediaStore.MediaColumns.SIZE),
-            null,
-            null,
-            null,
-        )?.use { c ->
-            if (c.moveToFirst()) c.getLong(0) * 1000L to c.getLong(1) else null
-        }
+            resolver.query(
+                uri,
+                arrayOf(MediaStore.MediaColumns.DATE_MODIFIED, MediaStore.MediaColumns.SIZE),
+                null,
+                null,
+                null,
+            )?.use { c ->
+                if (c.moveToFirst()) c.getLong(0) * 1000L to c.getLong(1) else null
+            }
     } catch (e: Exception) {
         null
     }

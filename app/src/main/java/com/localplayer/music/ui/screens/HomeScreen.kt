@@ -83,7 +83,8 @@ import com.localplayer.music.ui.components.ArtworkCollage
 import com.localplayer.music.ui.components.ArtworkImage
 import com.localplayer.music.ui.components.ArtworkRow
 import com.localplayer.music.ui.components.EmptyState
-import com.localplayer.music.ui.components.FastScrollbar
+import com.localplayer.music.ui.components.ThumbScrollbar
+import com.localplayer.music.ui.components.thumbAdapter
 import com.localplayer.music.ui.components.GenreStyle
 import com.localplayer.music.ui.components.LibraryActionRow
 import com.localplayer.music.ui.components.topFade
@@ -122,7 +123,8 @@ fun HomeScreen(
 
     Column(Modifier.fillMaxSize()) {
         // Compact top controls: no big title; Settings at the top right.
-        TopControls(onSettings = { nav.push(Screen.Settings) })
+        val updateAvailable by viewModel.updateAvailable.collectAsStateWithLifecycle()
+        TopControls(onSettings = { nav.push(Screen.Settings) }, showUpdateDot = updateAvailable)
         // No progress bar on Home while the (fast, incremental) scan runs at start-up; Settings > Scanning still shows it.
         if (!scan.isScanning && scan.error != null) ScanErrorBanner(scan, onRetry = viewModel::rescan)
 
@@ -134,6 +136,11 @@ fun HomeScreen(
             state = pagerState,
             modifier = Modifier.fillMaxSize(),
             beyondViewportPageCount = 0,
+            // A page changes after a shorter drag (20% instead of the default 50%): the swipe feels lighter.
+            flingBehavior = androidx.compose.foundation.pager.PagerDefaults.flingBehavior(
+                state = pagerState,
+                snapPositionalThreshold = 0.2f,
+            ),
             key = { page -> tabs.getOrNull(page)?.name ?: page },
         ) { page ->
             val tab = tabs.getOrElse(page) { LibraryTab.HOME }
@@ -349,7 +356,7 @@ private fun SongsTab(viewModel: LibraryViewModel, menu: SongMenuController) {
     val playerState by viewModel.playerState.collectAsStateWithLifecycle()
     val scan by viewModel.scanState.collectAsStateWithLifecycle()
     val currentId = playerState.nowPlaying?.mediaId?.toLongOrNull()
-    var gridMode by rememberSaveable { mutableStateOf(false) }
+    var gridMode by rememberSaveable { mutableStateOf(viewModel.settings.gridMode("songs", false)) }
     val scope = rememberCoroutineScope()
     val listState = rememberLazyListState()
     val gridState = rememberLazyGridState()
@@ -380,7 +387,7 @@ private fun SongsTab(viewModel: LibraryViewModel, menu: SongMenuController) {
         LibraryActionRow(
             onShuffle = { viewModel.playAll(list, shuffle = true) },
             viewMode = if (gridMode) ViewMode.GRID else ViewMode.LIST,
-            onToggleView = { gridMode = !gridMode },
+            onToggleView = { gridMode = !gridMode; viewModel.settings.setGridMode("songs", gridMode) },
             sortOptions = SongSort.entries.map { option ->
                 SortOption(sortLabel(option), option == sort) { viewModel.setSort(option) }
             },
@@ -389,8 +396,20 @@ private fun SongsTab(viewModel: LibraryViewModel, menu: SongMenuController) {
                 if (at >= 0) jumpTo(at)
             },
         )
-        Row(Modifier.fillMaxSize()) {
-            Box(Modifier.weight(1f).fillMaxSize()) {
+        // Scroll bar: an overlay on top of the list, which uses the whole width (the slim thumb sits in the right margin).
+        val scrollAdapter = remember(gridMode, listState, gridState) {
+            if (gridMode) gridState.thumbAdapter(columns = 2) else listState.thumbAdapter()
+        }
+        // The letter in the bubble only when the list is ordered by a name; for other sorts it is a plain scroll bar.
+        val letterOf: ((Int) -> String?)? = remember(sections) {
+            sections?.let { map ->
+                val sectionAt = AlphabetIndex.sectionAtIndex(map)
+                val lookup: (Int) -> String? = { index -> sectionAt(index)?.toString() }
+                lookup
+            }
+        }
+        Box(Modifier.fillMaxSize()) {
+            Box(Modifier.fillMaxSize()) {
                 if (gridMode) {
                     LazyVerticalGrid(
                         columns = GridCells.Fixed(2),
@@ -427,13 +446,12 @@ private fun SongsTab(viewModel: LibraryViewModel, menu: SongMenuController) {
                     }
                 }
             }
-            if (sections != null) {
-                FastScrollbar(
-                    letters = sections.keys.toList(),
-                    onLetter = { letter -> sections[letter]?.let { jumpTo(it) } },
-                    modifier = Modifier.padding(end = 2.dp),
-                )
-            }
+        ThumbScrollbar(
+            adapter = scrollAdapter,
+            letterAt = letterOf,
+            modifier = Modifier.fillMaxSize(),
+            bottomInset = com.localplayer.music.ui.components.LocalBottomBarInset.current,
+        )
         }
     }
 }
@@ -443,7 +461,7 @@ private fun SongsTab(viewModel: LibraryViewModel, menu: SongMenuController) {
 @Composable
 private fun AlbumsTab(viewModel: LibraryViewModel, nav: NavState) {
     val albums by viewModel.albums.collectAsStateWithLifecycle()
-    var gridMode by rememberSaveable { mutableStateOf(true) }
+    var gridMode by rememberSaveable { mutableStateOf(viewModel.settings.gridMode("albums", true)) }
     var sortIndex by rememberSaveable { mutableIntStateOf(0) }
     val raw = albums ?: return
     if (raw.isEmpty()) {
@@ -465,7 +483,7 @@ private fun AlbumsTab(viewModel: LibraryViewModel, nav: NavState) {
                 viewModel.shuffleSongs { it.albumGroupKey in keys }
             },
             viewMode = if (gridMode) ViewMode.GRID else ViewMode.LIST,
-            onToggleView = { gridMode = !gridMode },
+            onToggleView = { gridMode = !gridMode; viewModel.settings.setGridMode("albums", gridMode) },
             sortOptions = AlbumSort.entries.mapIndexed { i, _ -> SortOption(labels[i], i == sortIndex) { sortIndex = i } },
         )
         if (gridMode) {
@@ -552,7 +570,7 @@ fun AlbumCard(album: AlbumItem, modifier: Modifier = Modifier, onClick: () -> Un
 @Composable
 private fun ArtistsTab(viewModel: LibraryViewModel, nav: NavState) {
     val artists by viewModel.artists.collectAsStateWithLifecycle()
-    var gridMode by rememberSaveable { mutableStateOf(false) }
+    var gridMode by rememberSaveable { mutableStateOf(viewModel.settings.gridMode("artists", false)) }
     var sortIndex by rememberSaveable { mutableIntStateOf(0) }
     val raw = artists ?: return
     if (raw.isEmpty()) {
@@ -569,7 +587,7 @@ private fun ArtistsTab(viewModel: LibraryViewModel, nav: NavState) {
                 viewModel.shuffleSongs { (it.primaryArtistKey ?: "") in keys }
             },
             viewMode = if (gridMode) ViewMode.GRID else ViewMode.LIST,
-            onToggleView = { gridMode = !gridMode },
+            onToggleView = { gridMode = !gridMode; viewModel.settings.setGridMode("artists", gridMode) },
             sortOptions = labels.mapIndexed { i, l -> SortOption(l, i == sortIndex) { sortIndex = i } },
         )
         if (gridMode) {
@@ -652,7 +670,7 @@ private fun ArtistRow(artist: ArtistItem, unknown: String, onClick: () -> Unit) 
 @Composable
 private fun GenresTab(viewModel: LibraryViewModel, nav: NavState) {
     val genres by viewModel.genres.collectAsStateWithLifecycle()
-    var gridMode by rememberSaveable { mutableStateOf(true) }
+    var gridMode by rememberSaveable { mutableStateOf(viewModel.settings.gridMode("genres", true)) }
     var sortIndex by rememberSaveable { mutableIntStateOf(0) }
     val raw = genres ?: return
     if (raw.isEmpty()) {
@@ -669,7 +687,7 @@ private fun GenresTab(viewModel: LibraryViewModel, nav: NavState) {
                 viewModel.shuffleSongs { (TextNormalizer.groupKey(it.genre) ?: "") in keys }
             },
             viewMode = if (gridMode) ViewMode.GRID else ViewMode.LIST,
-            onToggleView = { gridMode = !gridMode },
+            onToggleView = { gridMode = !gridMode; viewModel.settings.setGridMode("genres", gridMode) },
             sortOptions = labels.mapIndexed { i, l -> SortOption(l, i == sortIndex) { sortIndex = i } },
         )
         if (gridMode) {
@@ -740,7 +758,7 @@ private fun GenreCard(genre: GenreItem, unknown: String, onClick: () -> Unit) {
 private fun PlaylistsTab(viewModel: LibraryViewModel, nav: NavState) {
     val playlists by viewModel.playlists.collectAsStateWithLifecycle()
     var creating by remember { mutableStateOf(false) }
-    var gridMode by rememberSaveable { mutableStateOf(true) }
+    var gridMode by rememberSaveable { mutableStateOf(viewModel.settings.gridMode("playlists", true)) }
     var sortIndex by rememberSaveable { mutableIntStateOf(0) }
     val raw = playlists ?: return
     val list = remember(raw, sortIndex) { LibrarySorting.playlists(raw, NameCountSort.entries[sortIndex]) }
@@ -752,7 +770,7 @@ private fun PlaylistsTab(viewModel: LibraryViewModel, nav: NavState) {
                 viewModel.shufflePlaylists(list.map { it.id })
             },
             viewMode = if (gridMode) ViewMode.GRID else ViewMode.LIST,
-            onToggleView = { gridMode = !gridMode },
+            onToggleView = { gridMode = !gridMode; viewModel.settings.setGridMode("playlists", gridMode) },
             sortOptions = labels.mapIndexed { i, l -> SortOption(l, i == sortIndex) { sortIndex = i } },
         )
         if (gridMode) {
@@ -794,7 +812,16 @@ private fun PlaylistsTab(viewModel: LibraryViewModel, nav: NavState) {
             }
         }
     }
-    if (creating) NewPlaylistFlow(viewModel, onDismiss = { creating = false })
+    if (creating) {
+        NewPlaylistFlow(
+            viewModel,
+            onDismiss = { creating = false },
+            onOpenDownload = {
+                creating = false
+                nav.push(Screen.SettingsDownload)
+            },
+        )
+    }
 }
 
 @Composable

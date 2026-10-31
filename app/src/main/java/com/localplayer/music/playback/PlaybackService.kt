@@ -34,7 +34,7 @@ import java.util.concurrent.Executors
  * foreground (with the media notification) only while playback is active, and exposes
  * lock-screen, Bluetooth and headset controls through the session.
  */
-@OptIn(UnstableApi::class)
+@androidx.annotation.OptIn(markerClass = [UnstableApi::class])
 class PlaybackService : MediaSessionService() {
 
     override fun attachBaseContext(base: android.content.Context) {
@@ -49,6 +49,7 @@ class PlaybackService : MediaSessionService() {
     private var sessionKeeper: PlaybackSessionKeeper? = null
     private var sessionStore: SessionStoreCore? = null
     private var sessionExecutor: ExecutorService? = null
+    private var trackFader: TrackFader? = null
 
     override fun onCreate() {
         super.onCreate()
@@ -87,13 +88,23 @@ class PlaybackService : MediaSessionService() {
             }
         })
 
-        // Saved playback session: all disk work happens on this single background thread.
-        val executor = Executors.newSingleThreadExecutor { r -> Thread(r, "playback-session").apply { isDaemon = true } }
-        val store = SessionStoreCore(File(filesDir, "playback-session"), executor, { Log.w(TAG, it) })
-        sessionExecutor = executor
-        sessionStore = store
-        sessionKeeper = PlaybackSessionKeeper(player, store, log = { Log.w(TAG, it) }).also { it.start() }
-        scope.launch { restoreSession(player, container, store) }
+        // Saved playback session: all disk work happens on this single background thread. The user can switch the
+        // restore off (Settings > Audio > Playback): then nothing is saved and an old saved queue is deleted.
+        if (container.settings.restoreQueue.value) {
+            val executor = Executors.newSingleThreadExecutor { r -> Thread(r, "playback-session").apply { isDaemon = true } }
+            val store = SessionStoreCore(File(filesDir, "playback-session"), executor, { Log.w(TAG, it) })
+            sessionExecutor = executor
+            sessionStore = store
+            sessionKeeper = PlaybackSessionKeeper(player, store, log = { Log.w(TAG, it) }).also { it.start() }
+            scope.launch { restoreSession(player, container, store) }
+        } else {
+            scope.launch(Dispatchers.IO) { runCatching { File(filesDir, "playback-session").deleteRecursively() } }
+        }
+
+        // Opt-in fade between songs: nothing is created or scheduled until the switch is on.
+        val fader = TrackFader(player) { container.settings.fadeSeconds.value * 1000L }
+        trackFader = fader
+        scope.launch { container.settings.fadeBetweenSongs.collect { on -> if (on) fader.start() else fader.stop() } }
 
         historyRecorder = HistoryRecorder(player, container.database.historyDao(), scope)
         listeningRecorder = ListeningRecorder(player, container.stats)
@@ -217,6 +228,8 @@ class PlaybackService : MediaSessionService() {
         sessionExecutor?.shutdown()
         sessionExecutor = null
         sessionStore = null
+        trackFader?.stop()
+        trackFader = null
         SleepTimer.detach()
         com.localplayer.music.widget.WidgetController.setPlayer(this, null)
         AudioEffectsHub.setPlayer(null, null)

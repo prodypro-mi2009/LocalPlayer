@@ -47,7 +47,7 @@ class UpdateViewModel(private val container: AppContainer) : ViewModel() {
         _state.value = UpdateUi.Checking
         job = viewModelScope.launch {
             val current = AppInfo.versionName(context)
-            val result = checker.check(AppInfo.repo(context), current)
+            val result = checker.check(AppInfo.repo(context), current, container.settings.includeBetaUpdates.value)
             if (result !is UpdateCheck.Offline) container.settings.lastUpdateCheckAt = System.currentTimeMillis()
             _state.value = when (result) {
                 is UpdateCheck.Newer -> {

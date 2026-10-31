@@ -133,6 +133,14 @@ interface TrackDao {
     @Query("SELECT uri FROM tracks WHERE $VISIBLE")
     suspend fun visibleUris(): List<String>
 
+    /** Every song the library shows, with what duplicate detection and M3U matching need (one-shot, read on demand only). */
+    @Query(
+        "SELECT t.id AS id, t.uri AS uri, t.title AS title, COALESCE(t.primaryArtist, t.artist) AS artist, t.album AS album, " +
+            "t.durationMs AS durationMs, t.sizeBytes AS sizeBytes, t.displayName AS name, t.lastModified AS lastModified " +
+            "FROM tracks t WHERE $VISIBLE_T",
+    )
+    suspend fun visibleBriefs(): List<com.localplayer.music.data.library.DupTrack>
+
     @RawQuery
     suspend fun queryArtistsRaw(query: SupportSQLiteQuery): List<ArtistRow>
 
@@ -357,6 +365,15 @@ interface PlaylistDao {
     @Query("SELECT trackUri FROM playlist_tracks WHERE playlistId = :playlistId ORDER BY position")
     suspend fun orderedUris(playlistId: Long): List<String>
 
+    /** The songs of a playlist in order, with the file name (for an .m3u export). Songs that are not in the library any more are left out. */
+    @Query(
+        "SELECT t.id AS id, t.uri AS uri, t.title AS title, COALESCE(t.primaryArtist, t.artist) AS artist, t.album AS album, " +
+            "t.durationMs AS durationMs, t.sizeBytes AS sizeBytes, t.displayName AS name, t.lastModified AS lastModified " +
+            "FROM playlist_tracks pt JOIN tracks t ON t.uri = pt.trackUri WHERE pt.playlistId = :id AND t.isAvailable = 1 " +
+            "ORDER BY pt.position",
+    )
+    suspend fun exportBriefs(id: Long): List<com.localplayer.music.data.library.DupTrack>
+
     @Query(
         "SELECT p.id AS id, p.name AS name, COUNT(t.id) AS trackCount, COALESCE(SUM(t.durationMs), 0) AS totalDurationMs, " +
             "p.sourceFolderKey AS sourceFolderKey, p.sourceFolderLabel AS sourceFolderLabel, " +
@@ -557,4 +574,79 @@ interface ListeningDao {
     /** Play history from before the statistics existed (version 6 and older), used for "last heard". */
     @Query("SELECT trackUri, 0 AS totalPlays, MAX(playedAt) AS lastAt FROM listening_history GROUP BY trackUri")
     suspend fun legacyLastPlayed(): List<UriStats>
+}
+
+
+/** What song matching needs from a library row (see TrackMatcher). */
+data class TrackMatchRow(
+    val uri: String,
+    val displayName: String?,
+    val title: String?,
+    val artist: String?,
+    val durationMs: Long,
+    val sizeBytes: Long,
+)
+
+/** Reads and bulk-writes the app data that the library backup covers. Used only by backup export/import. */
+@Dao
+interface BackupDao {
+    @Query("SELECT uri, displayName, title, artist, durationMs, sizeBytes FROM tracks")
+    suspend fun matchRows(): List<TrackMatchRow>
+
+    @Query("SELECT * FROM playlists ORDER BY id")
+    suspend fun playlists(): List<PlaylistEntity>
+
+    @Query("SELECT * FROM playlist_tracks ORDER BY playlistId, position")
+    suspend fun playlistTracks(): List<PlaylistTrackEntity>
+
+    @Query("SELECT * FROM favorites")
+    suspend fun favorites(): List<FavoriteEntity>
+
+    @Query("SELECT * FROM listening_history ORDER BY playedAt")
+    suspend fun history(): List<HistoryEntity>
+
+    @Query("SELECT * FROM listening_days")
+    suspend fun days(): List<ListeningDayEntity>
+
+    @Query("SELECT * FROM primary_artist_overrides")
+    suspend fun overrides(): List<PrimaryArtistOverrideEntity>
+
+    @Query("SELECT * FROM hidden_tracks")
+    suspend fun hidden(): List<HiddenTrackEntity>
+
+    @Query("SELECT * FROM excluded_folders")
+    suspend fun excluded(): List<ExcludedFolderEntity>
+
+    @Insert
+    suspend fun insertPlaylist(playlist: PlaylistEntity): Long
+
+    @Insert(onConflict = OnConflictStrategy.IGNORE)
+    suspend fun insertPlaylistTracks(rows: List<PlaylistTrackEntity>): List<Long>
+
+    @Insert(onConflict = OnConflictStrategy.IGNORE)
+    suspend fun insertFavorites(rows: List<FavoriteEntity>): List<Long>
+
+    @Insert(onConflict = OnConflictStrategy.IGNORE)
+    suspend fun insertHistory(rows: List<HistoryEntity>): List<Long>
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun putDays(rows: List<ListeningDayEntity>)
+
+    @Query("UPDATE playlists SET coverFile = :file WHERE id = :id")
+    suspend fun setCover(id: Long, file: String?)
+
+    @Query("DELETE FROM playlists")
+    suspend fun deleteAllPlaylists()
+
+    @Query("DELETE FROM favorites")
+    suspend fun deleteAllFavorites()
+
+    @Query("DELETE FROM listening_history")
+    suspend fun deleteAllHistory()
+
+    @Query("DELETE FROM listening_days")
+    suspend fun deleteAllDays()
+
+    @Query("DELETE FROM excluded_folders")
+    suspend fun deleteAllExcluded()
 }

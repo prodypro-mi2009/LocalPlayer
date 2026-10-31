@@ -55,10 +55,17 @@ import com.localplayer.music.ui.theme.lyricsVerticalBrush
  * bar icons are forced light. If the blurred artwork cannot be made, the tint alone is used.
  */
 @Composable
-fun LyricsScreen(nav: NavState, viewModel: LibraryViewModel, tone: Color?) {
+fun LyricsScreen(
+    nav: NavState,
+    viewModel: LibraryViewModel,
+    tone: Color?,
+    blurMode: Boolean = false,
+    blurredCover: androidx.compose.ui.graphics.ImageBitmap? = null,
+) {
     val state by viewModel.playerState.collectAsStateWithLifecycle()
     val now = state.nowPlaying
-    val blurred = rememberBlurredArtwork(now?.artwork)
+    // With the "Blurred cover" choice the page uses the shared blurred cover; otherwise the old faint texture (as before).
+    val blurred = rememberBlurredArtwork(if (blurMode) null else now?.artwork)
     val tint = animateColorAsState(
         targetValue = tone ?: fallbackTint(),
         animationSpec = Motion.AmbientTint,
@@ -76,7 +83,14 @@ fun LyricsScreen(nav: NavState, viewModel: LibraryViewModel, tone: Color?) {
     if (!pure) ForceStatusBarIcons(lightIcons = true)
 
     Box(Modifier.fillMaxSize().background(if (pure) MaterialTheme.colorScheme.background else Color.Black)) {
-        if (!pure) {
+        if (!pure && blurMode) {
+            // The same blurred cover as Now Playing, under a black veil (the lyrics text is always white).
+            com.localplayer.music.ui.components.BlurredCoverBackground(
+                image = blurredCover,
+                veil = ArtworkGradient.LYRICS_SCRIM + 0.06f,
+                veilColor = Color.Black,
+            )
+        } else if (!pure) {
             BlurredBackdrop(blurred)
             Box(Modifier.fillMaxSize().drawBehind { drawRect(lyricsVerticalBrush(tint.value)) })
             Box(Modifier.fillMaxSize().background(Color.Black.copy(alpha = ArtworkGradient.LYRICS_SCRIM)))
@@ -120,6 +134,7 @@ private fun LyricsBody(viewModel: LibraryViewModel, load: LyricsLoad?, isPlaying
                 PlainLyrics(lyrics.plainText, textAlign = textAlign)
             } else {
                 var follow by remember { mutableStateOf(true) }
+                val fill by viewModel.settings.lyricsFill.collectAsStateWithLifecycle()
                 val active = rememberActiveLyricIndex(viewModel, lyrics.lines, isPlaying)
                 Box(Modifier.fillMaxSize()) {
                     SyncedLyricsList(
@@ -127,6 +142,9 @@ private fun LyricsBody(viewModel: LibraryViewModel, load: LyricsLoad?, isPlaying
                         activeIndex = active,
                         follow = follow,
                         textAlign = textAlign,
+                        fill = fill,
+                        isPlaying = isPlaying,
+                        positionMs = viewModel::currentPositionMs,
                         onUserScroll = { follow = false },
                         onSeek = {
                             viewModel.seekTo(it)

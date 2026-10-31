@@ -79,7 +79,7 @@ fun MiniPlayer(
             val playColors = if (playColor != null) IconButtonDefaults.iconButtonColors(contentColor = playColor) else IconButtonDefaults.iconButtonColors()
             val previousSource = remember { MutableInteractionSource() }
             val playSource = remember { MutableInteractionSource() }
-            val nextSource = remember { MutableInteractionSource() }
+            val nextSource = remember(hasNext) { MutableInteractionSource() }
             IconButton(
                 onClick = onPrevious,
                 colors = skipColors,

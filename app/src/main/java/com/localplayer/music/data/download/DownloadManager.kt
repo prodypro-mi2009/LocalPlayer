@@ -28,9 +28,20 @@ data class DownloadItem(
     val id: String,
     val title: String,
     val artist: String,
+    /** Written into the file when not blank; when blank, the album YouTube states for the song (if any) is used. */
+    val album: String = "",
+    /** 4-digit year; when blank, the release year YouTube states (if any) is used. */
+    val year: String = "",
+    val genre: String = "",
+    /** Digits only (position on the album). */
+    val trackNumber: String = "",
+    /** Ticked by the user: the "fill in for many songs" action then touches only the ticked songs. */
+    val selected: Boolean = false,
     val status: ItemStatus = ItemStatus.WAITING,
     val progress: Float = 0f,
     val error: String? = null,
+    /** A saved song whose tags could not be written completely (the song itself is saved). */
+    val note: String? = null,
 )
 
 enum class DownloadPhase { IDLE, CHECKING, READY, DOWNLOADING }
@@ -45,6 +56,8 @@ data class DownloadState(
     val updatingEngine: Boolean = false,
     /** yt-dlp release installed by an update; null = the version bundled with the app. */
     val engineVersion: String? = null,
+    /** Write each song's artist also as the "album artist" tag. */
+    val albumArtistSame: Boolean = true,
 )
 
 /**
@@ -80,9 +93,39 @@ class DownloadManager(
 
     fun setArtist(id: String, artist: String) = edit(id) { it.copy(artist = artist) }
 
-    fun setArtistForAll(artist: String) = _state.update { s ->
-        s.copy(items = s.items.map { if (it.status == ItemStatus.DONE) it else it.copy(artist = artist) })
+    fun setTrackNumber(id: String, value: String) = edit(id) { it.copy(trackNumber = value.filter(Char::isDigit).take(4)) }
+
+    fun setSelected(id: String, on: Boolean) = edit(id) { it.copy(selected = on) }
+
+    fun selectAll(on: Boolean) = _state.update { s ->
+        s.copy(items = s.items.map { if (it.status == ItemStatus.DONE) it else it.copy(selected = on) })
     }
+
+    fun setAlbumArtistSame(on: Boolean) = _state.update { it.copy(albumArtistSame = on) }
+
+    /**
+     * Fills in the given fields (blank = leave that field alone) for the ticked songs, or for every song that is not
+     * saved yet when nothing is ticked. Fields that are not given keep whatever each song already has.
+     */
+    fun fillIn(artist: String, album: String, year: String, genre: String) = _state.update { s ->
+        val anyTicked = s.items.any { it.selected && it.status != ItemStatus.DONE }
+        s.copy(
+            items = s.items.map { item ->
+                if (item.status == ItemStatus.DONE || (anyTicked && !item.selected)) {
+                    item
+                } else {
+                    item.copy(
+                        artist = artist.trim().ifEmpty { item.artist },
+                        album = album.trim().ifEmpty { item.album },
+                        year = year.trim().ifEmpty { item.year },
+                        genre = genre.trim().ifEmpty { item.genre },
+                    )
+                }
+            },
+        )
+    }
+
+    fun setAlbum(id: String, value: String) = edit(id) { it.copy(album = value) }
 
     fun remove(id: String) = _state.update { s ->
         if (s.phase == DownloadPhase.DOWNLOADING) s else s.copy(items = s.items.filterNot { it.id == id })
@@ -117,11 +160,24 @@ class DownloadManager(
                 _state.update { it.copy(phase = DownloadPhase.IDLE, messageRes = R.string.dl_error_engine, detail = YtDlpEngine.describe(e)) }
                 return@launch
             }
+            // A YouTube Music album whose entries carry no position: the list order IS the album order.
+            val numberByOrder = found.size > 1 && found.all { it.trackNumber == null } && found.all { it.album.isNotBlank() }
             if (found.isEmpty()) {
                 _state.update { it.copy(phase = DownloadPhase.IDLE, messageRes = R.string.dl_error_none) }
             } else {
                 _state.update {
-                    it.copy(phase = DownloadPhase.READY, items = found.map { s -> DownloadItem(s.id, s.title, s.artist) })
+                    it.copy(
+                        phase = DownloadPhase.READY,
+                        items = found.mapIndexed { index, s ->
+                            DownloadItem(
+                                id = s.id,
+                                title = s.title,
+                                artist = s.artist,
+                                album = s.album,
+                                trackNumber = (s.trackNumber ?: if (numberByOrder) index + 1 else null)?.toString().orEmpty(),
+                            )
+                        },
+                    )
                 }
             }
         }
@@ -162,7 +218,7 @@ class DownloadManager(
             for (id in _state.value.items.filter { it.status != ItemStatus.DONE }.map { it.id }) {
                 val item = _state.value.items.firstOrNull { it.id == id } ?: continue
                 kotlinx.coroutines.currentCoroutineContext().ensureActive()
-                edit(id) { it.copy(status = ItemStatus.RUNNING, progress = 0f) }
+                edit(id) { it.copy(status = ItemStatus.RUNNING, progress = 0f, note = null) }
                 var error: String? = null
                 val ok = try {
                     downloadOne(item, cache)
@@ -186,17 +242,27 @@ class DownloadManager(
     }
 
     private fun downloadOne(item: DownloadItem, cache: File): Boolean {
-        val mp3 = YtDlpEngine.downloadMp3(context, item.id, cache, PROCESS_ID) { p ->
+        val downloaded = YtDlpEngine.downloadMp3(context, item.id, cache, PROCESS_ID) { p ->
             edit(item.id) { it.copy(progress = (p / 100f).coerceIn(0f, 1f)) }
         }
-        // Name and artist the user chose go INTO the file, so the library shows exactly what was typed.
-        val changes = buildMap<MetadataField, String?> {
-            put(MetadataField.TITLE, item.title.trim().ifBlank { item.id })
-            if (item.artist.isNotBlank()) put(MetadataField.ARTIST, item.artist.trim())
+        val mp3 = downloaded.file
+        val title = item.title.trim().ifBlank { item.id }
+        val artist = item.artist.trim()
+        // What the user typed wins; what is blank is filled from what YouTube itself states for the song.
+        val album = item.album.trim().ifBlank { downloaded.info.album }
+        val year = item.year.trim().ifBlank { downloaded.info.year }
+        val track = item.trackNumber.trim().ifBlank { downloaded.info.trackNumber?.toString().orEmpty() }
+        val changes = DownloadTags.changes(title, artist, album, item.genre.trim(), year, track, albumArtistSame = true)
+        // Everything the user chose goes INTO the file, so the library shows exactly what was typed.
+        try {
+            FileTagEngine.write(mp3, AudioContainer.MP3, changes)
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Throwable) {
+            edit(item.id) { it.copy(note = YtDlpEngine.describe(e)) }
         }
-        runCatching { FileTagEngine.write(mp3, AudioContainer.MP3, changes) }
         val fileName = YtDlpEngine.safeFileName(item.title, item.id)
-        return sink.save(mp3, fileName, item.title.trim(), item.artist.trim(), settings.downloadFolder.value)
+        return sink.save(mp3, fileName, title, artist, album, settings.downloadFolder.value)
     }
 
     // --- yt-dlp upkeep ---------------------------------------------------------------------------------------------

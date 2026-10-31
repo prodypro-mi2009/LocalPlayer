@@ -35,6 +35,7 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.fillMaxSize
@@ -77,7 +78,10 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import androidx.lifecycle.repeatOnLifecycle
 import androidx.media3.common.Player
 import com.localplayer.music.R
 import com.localplayer.music.playback.NowPlaying
@@ -93,7 +97,7 @@ import com.localplayer.music.ui.theme.Motion
 import com.localplayer.music.ui.theme.SheetPhysics
 import com.localplayer.music.ui.theme.pressScale
 import com.localplayer.music.ui.theme.rememberHaptics
-import com.localplayer.music.ui.theme.artworkVerticalBrush
+import com.localplayer.music.ui.theme.nowPlayingVerticalBrush
 import com.localplayer.music.util.formatDuration
 import android.os.SystemClock
 import androidx.compose.animation.core.animateFloatAsState
@@ -144,6 +148,8 @@ fun NowPlayingScreen(
     miniBottomPx: () -> Float,
     viewModel: LibraryViewModel,
     tone: Color?,
+    blurMode: Boolean,
+    blurred: androidx.compose.ui.graphics.ImageBitmap?,
     sheet: PlayerSheetState,
     onDismiss: () -> Unit,
     onOpenQueue: () -> Unit,
@@ -290,7 +296,7 @@ fun NowPlayingScreen(
                     miniTop = miniTopPx().takeIf { it > 0f } ?: (h - 150.dp.toPx()),
                     miniBottom = miniBottomPx().takeIf { it > 0f } ?: (h - 90.dp.toPx()),
                     insetPx = 8.dp.toPx(),
-                    cornerPx = 20.dp.toPx(),
+                    cornerPx = 36.dp.toPx(),
                 )
                 translationY = f.top
                 shape = MorphShape(
@@ -303,7 +309,7 @@ fun NowPlayingScreen(
                 alpha = SheetMorph.fade(p) * sheet.contentAlpha.value
             }
             .background(MaterialTheme.colorScheme.background)
-            .drawBehind { drawRect(artworkVerticalBrush(glow.value)) }
+            .drawBehind { if (!blurMode) drawRect(nowPlayingVerticalBrush(glow.value)) }
             // A finger landing on a moving sheet freezes it where it is (no jump); if it lifts without moving the
             // sheet, the sheet settles from there. Initial pass: nothing is consumed. Same for the queue sheet.
             .pointerInput(sheet, queueSheet) {
@@ -322,6 +328,11 @@ fun NowPlayingScreen(
             // Swallow touches so nothing behind the full-screen player can be tapped.
             .pointerInput(Unit) { detectTapGestures { } },
     ) {
+        // "Blurred cover" background (only when the user chose it): the pre-blurred picture of this song under a veil.
+        if (blurMode) com.localplayer.music.ui.components.BlurredCoverBackground(
+            image = blurred,
+            veil = com.localplayer.music.ui.components.NOW_PLAYING_BLUR_VEIL,
+        )
         // The player content: the only thing under the pull-down connection. It scales down a touch (depth cue)
         // as the queue sheet rises; read in the draw phase from the queue sheet's single float.
         Box(
@@ -340,6 +351,7 @@ fun NowPlayingScreen(
         ) {
         BoxWithConstraints(Modifier.fillMaxSize().statusBarsPadding().navigationBarsPadding()) {
             val minHeight = maxHeight
+            val pageWidth = maxWidth
             Column(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -359,6 +371,13 @@ fun NowPlayingScreen(
                         textAlign = TextAlign.Center,
                         modifier = Modifier.weight(1f),
                     )
+                    val outputContext = androidx.compose.ui.platform.LocalContext.current
+                    IconButton(
+                        onClick = { com.localplayer.music.util.AudioOutput.openPicker(outputContext) },
+                        modifier = Modifier.size(48.dp),
+                    ) {
+                        Icon(AppIcons.Cast, contentDescription = stringResource(R.string.audio_output))
+                    }
                     IconButton(onClick = { queueSheet.open() }, modifier = Modifier.size(48.dp)) {
                         Icon(
                             AppIcons.Queue,
@@ -366,6 +385,14 @@ fun NowPlayingScreen(
                         )
                     }
                 }
+
+                // OPT-IN lyrics line (Settings > Lyrics), one line directly above the progress bar. Its slot must not make the
+                // page taller: the title row gives up its spare 12 dp and the artwork the rest (20 dp), so everything below the
+                // bar stays exactly where it is and the page never starts to scroll because of it.
+                val lyricsInPlayer by viewModel.settings.lyricsInPlayer.collectAsStateWithLifecycle()
+                val lyricsSlotHeight = 32.dp
+                val titleRowMin = if (lyricsInPlayer) 76.dp else 88.dp
+                val artworkWidth = pageWidth - 48.dp - (if (lyricsInPlayer) lyricsSlotHeight - 12.dp else 0.dp)
 
                 // Next = content moves left; Previous = content moves right. Derived from the queue index, which
                 // arrives in the same state emission as the new track, so it is correct when the transition starts.
@@ -393,12 +420,12 @@ fun NowPlayingScreen(
                             size = 320.dp,
                             cornerRadius = 64.dp,
                             modifier = Modifier
-                                .fillMaxWidth()
+                                .width(artworkWidth)
                                 .aspectRatio(1f)
                                 .clickable(onClickLabel = stringResource(R.string.lyrics), onClick = onOpenLyrics),
                         )
                         Spacer(Modifier.height(20.dp))
-                        Row(Modifier.fillMaxWidth().heightIn(min = 88.dp), verticalAlignment = Alignment.CenterVertically) {
+                        Row(Modifier.fillMaxWidth().heightIn(min = titleRowMin), verticalAlignment = Alignment.CenterVertically) {
                             Column(Modifier.weight(1f)) {
                                 val labelColor = controlColor(ControlColorGroup.NOW_PLAYING_TEXT)
                                 Text(
@@ -429,6 +456,17 @@ fun NowPlayingScreen(
                     }
                 }
 
+                // OPT-IN (Settings > Lyrics): the current line of synchronized lyrics, one line in a fixed-height slot above the progress bar.
+                if (lyricsInPlayer) {
+                    val lyricsFill by viewModel.settings.lyricsFill.collectAsStateWithLifecycle()
+                    com.localplayer.music.ui.components.NowPlayingLyricLine(
+                        viewModel = viewModel,
+                        trackId = now.mediaId.toLongOrNull(),
+                        isPlaying = state.isPlaying,
+                        fill = lyricsFill,
+                        modifier = Modifier.height(lyricsSlotHeight),
+                    )
+                }
                 WaveSeekBar(
                     fraction = { smooth.floatValue },
                     semanticFraction = fraction,
@@ -647,10 +685,13 @@ private fun TransportButtons(
     val reduceMotion = LocalReduceMotion.current
     val previousSource = remember { MutableInteractionSource() }
     val playSource = remember { MutableInteractionSource() }
-    val nextSource = remember { MutableInteractionSource() }
+    // A fresh source whenever Next becomes (un)available: a press that was cut short by the button being disabled
+    // (last song) can never stay "pressed" and keep the button wide for the rest of the session.
+    val nextSource = remember(hasNext) { MutableInteractionSource() }
     val previousPressed by previousSource.collectIsPressedAsState()
     val playPressed by playSource.collectIsPressedAsState()
-    val nextPressed by nextSource.collectIsPressedAsState()
+    val nextPressedRaw by nextSource.collectIsPressedAsState()
+    val nextPressed = nextPressedRaw && hasNext
     val anyPressed = previousPressed || playPressed || nextPressed
 
     @Composable
@@ -778,11 +819,15 @@ fun FavoriteButton(viewModel: LibraryViewModel, trackUri: String?) {
 
 @Composable
 internal fun sleepLabel(state: SleepTimerState): String {
-    val remaining by produceState(initialValue = 0L, state) {
+    val lifecycleOwner = LocalLifecycleOwner.current
+    val remaining by produceState(initialValue = 0L, state, lifecycleOwner) {
         if (state is SleepTimerState.Counting) {
-            while (true) {
-                value = (state.endsAtElapsedMs - SystemClock.elapsedRealtime()).coerceAtLeast(0L)
-                delay(1_000) // only while this screen is composed
+            // Ticks only while the screen is visible (STARTED): nothing wakes up every second in the background.
+            lifecycleOwner.lifecycle.repeatOnLifecycle(Lifecycle.State.STARTED) {
+                while (true) {
+                    value = (state.endsAtElapsedMs - SystemClock.elapsedRealtime()).coerceAtLeast(0L)
+                    delay(1_000)
+                }
             }
         }
     }
@@ -901,7 +946,10 @@ private class MorphShape(
         androidx.compose.ui.graphics.Outline.Rounded(
             androidx.compose.ui.geometry.RoundRect(
                 left, 0f, right.coerceAtLeast(left), height.coerceIn(0f, size.height),
-                androidx.compose.ui.geometry.CornerRadius(radius),
+                // Never larger than half of the window's own width / height (the closed sheet is only as tall as the mini player).
+                androidx.compose.ui.geometry.CornerRadius(
+                    radius.coerceAtMost(minOf((right - left) / 2f, height / 2f)).coerceAtLeast(0f),
+                ),
             ),
         )
 }

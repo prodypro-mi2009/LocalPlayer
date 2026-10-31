@@ -44,11 +44,11 @@ sealed interface DownloadResult {
  */
 class UpdateChecker(private val userAgent: String) {
 
-    suspend fun check(repo: String, currentVersion: String): UpdateCheck = withContext(Dispatchers.IO) {
+    suspend fun check(repo: String, currentVersion: String, includeBeta: Boolean = false): UpdateCheck = withContext(Dispatchers.IO) {
         if (!UpdateRules.isValidRepo(repo)) return@withContext UpdateCheck.NotConfigured
         var connection: HttpURLConnection? = null
         try {
-            connection = (URL("https://api.github.com/repos/$repo/releases/latest").openConnection() as HttpURLConnection).apply {
+            connection = (URL(if (includeBeta) "https://api.github.com/repos/$repo/releases?per_page=15" else "https://api.github.com/repos/$repo/releases/latest").openConnection() as HttpURLConnection).apply {
                 connectTimeout = 8_000
                 readTimeout = 10_000
                 setRequestProperty("User-Agent", userAgent)
@@ -57,7 +57,8 @@ class UpdateChecker(private val userAgent: String) {
             when (val code = connection.responseCode) {
                 200 -> {
                     val body = connection.inputStream.bufferedReader().use { it.readText() }
-                    val release = parseRelease(body, repo) ?: return@withContext UpdateCheck.NoRelease
+                    val release = (if (includeBeta) parseBestRelease(body, repo) else parseRelease(body, repo))
+                        ?: return@withContext UpdateCheck.NoRelease
                     if (VersionCompare.isNewer(release.tag, currentVersion)) UpdateCheck.Newer(release)
                     else UpdateCheck.UpToDate(release.tag)
                 }
@@ -76,13 +77,32 @@ class UpdateChecker(private val userAgent: String) {
      * Reads the release JSON. Drafts, pre-releases and unreadable tags give null (= treated as "no release"). The
      * page and APK links are kept only when they belong to the configured repository on github.com.
      */
-    fun parseRelease(body: String, repo: String): ReleaseInfo? {
+    fun parseRelease(body: String, repo: String, allowPreRelease: Boolean = false): ReleaseInfo? {
         val o = try {
             JSONObject(body)
         } catch (e: Exception) {
             return null
         }
-        if (o.optBoolean("draft", false) || o.optBoolean("prerelease", false)) return null
+        return parseReleaseObject(o, repo, allowPreRelease)
+    }
+
+    /** From a releases LIST (beta channel): the highest readable version among published releases, pre-releases included. */
+    fun parseBestRelease(body: String, repo: String): ReleaseInfo? {
+        val arr = try {
+            org.json.JSONArray(body)
+        } catch (e: Exception) {
+            return null
+        }
+        var best: ReleaseInfo? = null
+        for (i in 0 until arr.length()) {
+            val r = arr.optJSONObject(i)?.let { parseReleaseObject(it, repo, allowPreRelease = true) } ?: continue
+            if (best == null || VersionCompare.isNewer(r.tag, best.tag)) best = r
+        }
+        return best
+    }
+
+    private fun parseReleaseObject(o: JSONObject, repo: String, allowPreRelease: Boolean): ReleaseInfo? {
+        if (o.optBoolean("draft", false) || (!allowPreRelease && o.optBoolean("prerelease", false))) return null
         val tag = o.optString("tag_name").takeIf { VersionCompare.isValid(it) } ?: return null
         val list = ArrayList<UpdateRules.Asset>()
         o.optJSONArray("assets")?.let { assets ->

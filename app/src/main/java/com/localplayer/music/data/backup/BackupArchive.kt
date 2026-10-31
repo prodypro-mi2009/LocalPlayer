@@ -13,6 +13,10 @@ class ParsedArchive(
     val settings: BackupFormat.DecodedSettings,
     val background: File?,
     val font: File?,
+    /** library.json text (playlists, favourites, history, rules), or null for a settings-only / version 1 backup. */
+    val library: String? = null,
+    /** Playlist cover pictures by file name (the name used in library.json). */
+    val covers: Map<String, File> = emptyMap(),
 )
 
 /**
@@ -30,12 +34,12 @@ object BackupArchive {
 
     class Asset(val path: String, val open: () -> InputStream)
 
-    fun write(out: OutputStream, settingsJson: String, appVersion: String, exportedAtMs: Long, assets: List<Asset>) {
+    fun write(out: OutputStream, settingsJson: String, appVersion: String, exportedAtMs: Long, assets: List<Asset>, libraryJson: String? = null) {
         val zip = ZipOutputStream(out)
         val infos = ArrayList<Map<String, Any>>()
         val assetBytes = ArrayList<Pair<String, ByteArray>>()
         for (a in assets) {
-            require(a.path in BackupFormat.ALLOWED_ENTRIES) { "Unexpected asset path ${a.path}" }
+            require(BackupFormat.isAllowedEntry(a.path)) { "Unexpected asset path ${a.path}" }
             val bytes = a.open().use { it.readBytes() }
             infos += linkedMapOf("path" to a.path, "size" to bytes.size.toLong(), "sha256" to sha256(bytes))
             assetBytes += a.path to bytes
@@ -43,15 +47,17 @@ object BackupArchive {
         val manifest = MiniJson.stringify(
             linkedMapOf(
                 "format" to BackupFormat.ARCHIVE_FORMAT,
-                "schema" to BackupFormat.SCHEMA,
+                "schema" to BackupFormat.ARCHIVE_SCHEMA,
                 "appVersion" to appVersion,
                 "exportedAt" to exportedAtMs,
                 "settingsSha256" to sha256(settingsJson.toByteArray()),
+                "librarySha256" to libraryJson?.let { sha256(it.toByteArray()) },
                 "assets" to infos,
             ),
         )
         put(zip, BackupFormat.MANIFEST, manifest.toByteArray())
         put(zip, BackupFormat.SETTINGS, settingsJson.toByteArray())
+        if (libraryJson != null) put(zip, BackupFormat.LIBRARY, libraryJson.toByteArray())
         for ((path, bytes) in assetBytes) put(zip, path, bytes)
         zip.finish()
         zip.flush()
@@ -77,13 +83,17 @@ object BackupArchive {
                 while (true) {
                     val entry = zip.nextEntry ?: break
                     if (entry.isDirectory) continue
-                    if (++count > 8) throw BackupFormat.InvalidBackup("The archive has too many entries")
+                    if (++count > 8 + BackupFormat.MAX_COVERS) throw BackupFormat.InvalidBackup("The archive has too many entries")
                     val name = entry.name
-                    if (name !in BackupFormat.ALLOWED_ENTRIES) throw BackupFormat.InvalidBackup("Unexpected entry in the archive: $name")
+                    if (!BackupFormat.isAllowedEntry(name)) throw BackupFormat.InvalidBackup("Unexpected entry in the archive: $name")
                     if (name in texts || name in files) throw BackupFormat.InvalidBackup("Duplicate entry: $name")
-                    val limit = if (name == BackupFormat.MANIFEST || name == BackupFormat.SETTINGS) BackupFormat.MAX_SETTINGS_BYTES else BackupFormat.MAX_ENTRY_BYTES
+                    val limit = when (name) {
+                        BackupFormat.MANIFEST, BackupFormat.SETTINGS -> BackupFormat.MAX_SETTINGS_BYTES
+                        BackupFormat.LIBRARY -> BackupFormat.MAX_LIBRARY_BYTES
+                        else -> BackupFormat.MAX_ENTRY_BYTES
+                    }
                     val digest = MessageDigest.getInstance("SHA-256")
-                    val isText = name == BackupFormat.MANIFEST || name == BackupFormat.SETTINGS
+                    val isText = name == BackupFormat.MANIFEST || name == BackupFormat.SETTINGS || name == BackupFormat.LIBRARY
                     val sink = if (isText) java.io.ByteArrayOutputStream() else File(tempDir, "asset-${files.size}").also { files[name] = it }.outputStream()
                     var size = 0L
                     sink.use { o ->
@@ -106,8 +116,14 @@ object BackupArchive {
             val manifest = try { MiniJson.parseObject(manifestText) } catch (e: MiniJson.JsonException) { throw BackupFormat.InvalidBackup("manifest.json is damaged") }
             if (manifest["format"] != BackupFormat.ARCHIVE_FORMAT) throw BackupFormat.InvalidBackup("This archive is not a LocalPlayer backup")
             val schema = (manifest["schema"] as? Double)?.toInt() ?: throw BackupFormat.InvalidBackup("Missing schema version")
-            if (schema < 1 || schema > BackupFormat.SCHEMA) throw BackupFormat.InvalidBackup("Unsupported backup version $schema")
+            if (schema < 1 || schema > BackupFormat.ARCHIVE_SCHEMA) throw BackupFormat.InvalidBackup("Unsupported backup version $schema")
             if (manifest["settingsSha256"] != sums[BackupFormat.SETTINGS]) throw BackupFormat.InvalidBackup("settings.json does not match its checksum (damaged file)")
+            val libraryText = texts[BackupFormat.LIBRARY]
+            if (libraryText != null) {
+                if (manifest["librarySha256"] != sums[BackupFormat.LIBRARY]) throw BackupFormat.InvalidBackup("library.json does not match its checksum (damaged file)")
+            } else if (manifest["librarySha256"] != null) {
+                throw BackupFormat.InvalidBackup("library.json is missing")
+            }
             val declared = (manifest["assets"] as? List<Any?>).orEmpty().map { it as? Map<String, Any?> ?: throw BackupFormat.InvalidBackup("Bad asset list") }
             val declaredPaths = declared.map { it["path"] as? String }
             if (declaredPaths.toSet() != files.keys) throw BackupFormat.InvalidBackup("The asset list does not match the archive contents")
@@ -116,7 +132,11 @@ object BackupArchive {
                 if (d["sha256"] != sums[path] || (d["size"] as? Double)?.toLong() != files.getValue(path).length())
                     throw BackupFormat.InvalidBackup("$path does not match its checksum (damaged file)")
             }
-            return ParsedArchive(BackupFormat.decodeSettings(settingsText), files[BackupFormat.BACKGROUND_PATH], files[BackupFormat.FONT_PATH])
+            val covers = files.filterKeys { it.startsWith(BackupFormat.COVERS_DIR) }.mapKeys { it.key.removePrefix(BackupFormat.COVERS_DIR) }
+            return ParsedArchive(
+                BackupFormat.decodeSettings(settingsText), files[BackupFormat.BACKGROUND_PATH], files[BackupFormat.FONT_PATH],
+                libraryText, covers,
+            )
         } catch (e: BackupFormat.InvalidBackup) {
             cleanup(tempDir); throw e
         } catch (e: java.util.zip.ZipException) {

@@ -30,10 +30,16 @@ import com.localplayer.music.data.effects.ReplayGainMode
 import com.localplayer.music.playback.AudioEffectsHub
 import com.localplayer.music.playback.EqStatus
 import com.localplayer.music.ui.LibraryViewModel
+import com.localplayer.music.ui.components.SettingsCustomRow
+import com.localplayer.music.ui.components.SettingsGroup
+import com.localplayer.music.ui.components.SettingsLinkRow
+import com.localplayer.music.ui.components.SettingsScaffold
+import com.localplayer.music.ui.components.SettingsSliderRow
+import com.localplayer.music.ui.components.SettingsSwitchRow
 import com.localplayer.music.ui.nav.NavState
 
 @Composable
-private fun SwitchRow(title: Int, note: Int, checked: Boolean, onChange: (Boolean) -> Unit) {
+internal fun SwitchRow(title: Int, note: Int, checked: Boolean, onChange: (Boolean) -> Unit) {
     Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
         Column(Modifier.weight(1f)) {
             Text(stringResource(title), style = MaterialTheme.typography.titleMedium)
@@ -61,8 +67,36 @@ fun AudioSettingsScreen(nav: NavState, @Suppress("UNUSED_PARAMETER") viewModel: 
     listOf(
         SettingsEntry(R.string.eq_title, R.string.settings_card_eq, AppIcons.GraphicEq, Color(0xFF7A5A12)) { nav.push(Screen.SettingsEqualizer) },
         SettingsEntry(R.string.rg_title, R.string.settings_card_rg, AppIcons.VolumeUp, Color(0xFF2F6B7A)) { nav.push(Screen.SettingsReplayGain) },
+        SettingsEntry(R.string.playback_title, R.string.settings_card_playback, AppIcons.Tune, Color(0xFF5A3F8F)) { nav.push(Screen.SettingsPlayback) },
     ),
 )
+
+/** Settings > Audio > Playback: restoring the queue after the app was closed, and the (opt-in) fade between songs. */
+@Composable
+fun PlaybackSettingsScreen(nav: NavState, viewModel: LibraryViewModel) {
+    val s = viewModel.settings
+    val restore by s.restoreQueue.collectAsStateWithLifecycle()
+    val fade by s.fadeBetweenSongs.collectAsStateWithLifecycle()
+    val seconds by s.fadeSeconds.collectAsStateWithLifecycle()
+    SettingsScaffold(title = stringResource(R.string.playback_title), onBack = { nav.pop() }) {
+        SettingsGroup {
+            item { SettingsSwitchRow(stringResource(R.string.playback_restore), restore, s::setRestoreQueue, note = stringResource(R.string.playback_restore_note)) }
+            item { SettingsSwitchRow(stringResource(R.string.playback_fade), fade, s::setFadeBetweenSongs, note = stringResource(R.string.playback_fade_note)) }
+            if (fade) {
+                item {
+                    SettingsSliderRow(
+                        title = stringResource(R.string.playback_fade_length, seconds),
+                        valueText = "",
+                        value = seconds.toFloat(),
+                        onChange = { s.setFadeSeconds(Math.round(it)) },
+                        range = com.localplayer.music.playback.FadeMath.MIN_SECONDS.toFloat()..com.localplayer.music.playback.FadeMath.MAX_SECONDS.toFloat(),
+                        steps = com.localplayer.music.playback.FadeMath.MAX_SECONDS - com.localplayer.music.playback.FadeMath.MIN_SECONDS - 1,
+                    )
+                }
+            }
+        }
+    }
+}
 
 @Composable
 fun ReplayGainSettingsScreen(nav: NavState, viewModel: LibraryViewModel) {
@@ -70,34 +104,35 @@ fun ReplayGainSettingsScreen(nav: NavState, viewModel: LibraryViewModel) {
     val rgOn by s.replayGainEnabled.collectAsStateWithLifecycle()
     val rgMode by s.replayGainMode.collectAsStateWithLifecycle()
     val rgClip by s.replayGainPreventClipping.collectAsStateWithLifecycle()
-    SettingsPage(R.string.rg_title, nav) {
-        // ---- ReplayGain
-        SwitchRow(R.string.rg_title, R.string.rg_note, rgOn, viewModel::setReplayGainEnabled)
-        if (rgOn) {
-            Column(Modifier.padding(horizontal = 16.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    FilterChip(
-                        selected = rgMode == ReplayGainMode.TRACK,
-                        onClick = { viewModel.setReplayGainMode(ReplayGainMode.TRACK) },
-                        label = { Text(stringResource(R.string.rg_track)) },
-                    )
-                    FilterChip(
-                        selected = rgMode == ReplayGainMode.ALBUM,
-                        onClick = { viewModel.setReplayGainMode(ReplayGainMode.ALBUM) },
-                        label = { Text(stringResource(R.string.rg_album)) },
-                    )
+    SettingsScaffold(title = stringResource(R.string.rg_title), onBack = { nav.pop() }) {
+        SettingsGroup(note = if (rgOn) stringResource(R.string.rg_limits) else null) {
+            item { SettingsSwitchRow(stringResource(R.string.rg_title), rgOn, viewModel::setReplayGainEnabled, note = stringResource(R.string.rg_note)) }
+            if (rgOn) {
+                item {
+                    SettingsCustomRow {
+                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            FilterChip(
+                                selected = rgMode == ReplayGainMode.TRACK,
+                                onClick = { viewModel.setReplayGainMode(ReplayGainMode.TRACK) },
+                                label = { Text(stringResource(R.string.rg_track)) },
+                            )
+                            FilterChip(
+                                selected = rgMode == ReplayGainMode.ALBUM,
+                                onClick = { viewModel.setReplayGainMode(ReplayGainMode.ALBUM) },
+                                label = { Text(stringResource(R.string.rg_album)) },
+                            )
+                        }
+                        Text(
+                            stringResource(R.string.rg_mode_note),
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.padding(top = 8.dp),
+                        )
+                    }
                 }
-                Text(stringResource(R.string.rg_mode_note), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                item { SettingsSwitchRow(stringResource(R.string.rg_clip), rgClip, viewModel::setReplayGainPreventClipping, note = stringResource(R.string.rg_clip_note)) }
             }
-            SwitchRow(R.string.rg_clip, R.string.rg_clip_note, rgClip, viewModel::setReplayGainPreventClipping)
-            Text(
-                stringResource(R.string.rg_limits),
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp),
-            )
         }
-
     }
 }
 
@@ -109,40 +144,46 @@ fun EqualizerSettingsScreen(nav: NavState, viewModel: LibraryViewModel) {
     val preset by s.eqPreset.collectAsStateWithLifecycle()
     val custom by s.eqCustom.collectAsStateWithLifecycle()
     val status by AudioEffectsHub.eqStatus.collectAsStateWithLifecycle()
-    SettingsPage(R.string.eq_title, nav) {
-        // ---- Equalizer
-        SwitchRow(R.string.eq_title, R.string.eq_note, eqOn, viewModel::setEqualizerEnabled)
-        if (eqOn) {
-            Column(Modifier.padding(horizontal = 16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                when (val st = status) {
-                    is EqStatus.Active -> Text(
-                        stringResource(R.string.eq_device_bands, st.centersHz.size.toString(), st.centersHz.joinToString(", ") { "$it Hz" }),
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                    EqStatus.Unavailable -> Text(stringResource(R.string.eq_unavailable), color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodyMedium)
-                    EqStatus.Off -> Text(stringResource(R.string.eq_waiting), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                }
-                FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    EqPreset.entries.forEach { p ->
-                        FilterChip(selected = preset == p, onClick = { viewModel.setEqPreset(p) }, label = { Text(stringResource(presetLabel(p))) })
+    SettingsScaffold(title = stringResource(R.string.eq_title), onBack = { nav.pop() }) {
+        SettingsGroup(note = if (eqOn) stringResource(R.string.eq_five_note) else null) {
+            item { SettingsSwitchRow(stringResource(R.string.eq_title), eqOn, viewModel::setEqualizerEnabled, note = stringResource(R.string.eq_note)) }
+            if (eqOn) {
+                item {
+                    SettingsCustomRow {
+                        when (val st = status) {
+                            is EqStatus.Active -> Text(
+                                stringResource(R.string.eq_device_bands, st.centersHz.size.toString(), st.centersHz.joinToString(", ") { "$it Hz" }),
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                            EqStatus.Unavailable -> Text(stringResource(R.string.eq_unavailable), color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodyMedium)
+                            EqStatus.Off -> Text(stringResource(R.string.eq_waiting), style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        }
+                        FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.padding(top = 8.dp)) {
+                            EqPreset.entries.forEach { p ->
+                                FilterChip(selected = preset == p, onClick = { viewModel.setEqPreset(p) }, label = { Text(stringResource(presetLabel(p))) })
+                            }
+                        }
                     }
                 }
-                val shown = preset.gainsDb(custom)
-                EqModel.BAND_HZ.forEachIndexed { i, hz ->
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Text(bandLabel(hz), Modifier.weight(0.25f), style = MaterialTheme.typography.bodySmall)
-                        Slider(
-                            value = shown[i],
-                            onValueChange = { viewModel.setEqCustomBand(i, Math.round(it * 2) / 2f) },
-                            valueRange = -EqModel.MAX_DB..EqModel.MAX_DB,
-                            modifier = Modifier.weight(0.5f),
-                        )
-                        Text("%+.1f dB".format(java.util.Locale.ROOT, shown[i]), Modifier.weight(0.25f), style = MaterialTheme.typography.bodySmall)
+                item {
+                    SettingsCustomRow {
+                        val shown = preset.gainsDb(custom)
+                        EqModel.BAND_HZ.forEachIndexed { i, hz ->
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Text(bandLabel(hz), Modifier.weight(0.25f), style = MaterialTheme.typography.bodyMedium)
+                                Slider(
+                                    value = shown[i],
+                                    onValueChange = { viewModel.setEqCustomBand(i, Math.round(it * 2) / 2f) },
+                                    valueRange = -EqModel.MAX_DB..EqModel.MAX_DB,
+                                    modifier = Modifier.weight(0.5f),
+                                )
+                                Text("%+.1f dB".format(java.util.Locale.ROOT, shown[i]), Modifier.weight(0.25f), style = MaterialTheme.typography.bodyMedium, textAlign = androidx.compose.ui.text.style.TextAlign.End)
+                            }
+                        }
                     }
                 }
-                OutlinedButton(onClick = viewModel::resetEqualizer) { Text(stringResource(R.string.eq_reset)) }
-                Text(stringResource(R.string.eq_five_note), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                item { SettingsLinkRow(stringResource(R.string.eq_reset), onClick = viewModel::resetEqualizer) }
             }
         }
     }
@@ -152,11 +193,10 @@ fun EqualizerSettingsScreen(nav: NavState, viewModel: LibraryViewModel) {
 @Composable
 fun WidgetsSettingsScreen(nav: NavState, viewModel: LibraryViewModel) {
     val on by viewModel.settings.widgetsEnabled.collectAsStateWithLifecycle()
-    SettingsPage(R.string.settings_widgets, nav) {
-        SwitchRow(R.string.widgets_title, R.string.widgets_note, on, viewModel::setWidgetsEnabled)
-        Column(Modifier.padding(horizontal = 16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            Text(stringResource(R.string.widgets_how), style = MaterialTheme.typography.bodyMedium)
-            Text(stringResource(R.string.widgets_off_note), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+    SettingsScaffold(title = stringResource(R.string.settings_widgets), onBack = { nav.pop() }) {
+        SettingsGroup(note = stringResource(R.string.widgets_off_note)) {
+            item { SettingsSwitchRow(stringResource(R.string.widgets_title), on, viewModel::setWidgetsEnabled, note = stringResource(R.string.widgets_note)) }
+            item { SettingsCustomRow { Text(stringResource(R.string.widgets_how), style = MaterialTheme.typography.bodyMedium) } }
         }
     }
 }

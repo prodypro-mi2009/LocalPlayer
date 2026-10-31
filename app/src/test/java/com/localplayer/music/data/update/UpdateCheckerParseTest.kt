@@ -105,4 +105,18 @@ class UpdateCheckerParseTest {
         assertFalse(UpdateRules.isAllowedReleasePage("https://github.com/other/x/releases/tag/v1", repo))
         assertFalse(UpdateRules.isAllowedReleasePage("http://github.com/$repo/releases/tag/v1", repo))
     }
+
+    @Test fun betaChannel_picksHighestIncludingPreReleases_andStableChannelSkipsThem() {
+        fun r(tag: String, pre: Boolean) = release(
+            tag = tag, prerelease = pre,
+            page = "https://github.com/$repo/releases/tag/$tag",
+            assets = asset("a.apk", "https://github.com/$repo/releases/download/$tag/a.apk"),
+        )
+        val list = "[" + listOf(r("v.1.5.0-beta3", true), r("V.1.4.2", false), r("v1.5.0-beta4", true)).joinToString(",") + "]"
+        assertEquals("v1.5.0-beta4", checker.parseBestRelease(list, repo)!!.tag)
+        assertNull(checker.parseRelease(r("v.1.5.0-beta3", true), repo))
+        assertEquals("v.1.5.0-beta3", checker.parseRelease(r("v.1.5.0-beta3", true), repo, allowPreRelease = true)!!.tag)
+        assertNull(checker.parseBestRelease("{}", repo))
+        assertNull(checker.parseBestRelease("[]", repo))
+    }
 }

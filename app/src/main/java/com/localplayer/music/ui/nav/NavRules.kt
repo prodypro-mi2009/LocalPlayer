@@ -12,10 +12,10 @@ object NavRules {
     /** Screens that may exist at most once in the stack. Re-opening one goes back to the existing entry. */
     fun isSingleton(screen: Screen): Boolean = when (screen) {
         Screen.Lyrics, Screen.Queue, Screen.Settings, Screen.Search, Screen.Recent,
-        Screen.HiddenSongs, Screen.LibraryFolders, Screen.Colors, Screen.Fonts,
+        Screen.HiddenSongs, Screen.Duplicates, Screen.LibraryFolders, Screen.Colors, Screen.Fonts,
         Screen.SettingsAppearance, Screen.SettingsLanguage, Screen.SettingsLibrary, Screen.SettingsLyrics,
         Screen.SettingsYourMix, Screen.SettingsAbout, Screen.SettingsBackup, Screen.SettingsAudio, Screen.SettingsWidgets, Screen.SettingsDownload,
-        Screen.SettingsNavigation, Screen.SettingsTabOrder, Screen.SettingsGestures, Screen.SettingsScan, Screen.SettingsTheme, Screen.SettingsEqualizer, Screen.SettingsReplayGain, Screen.SettingsMixGeneral, Screen.SettingsMixStrategy, Screen.SettingsMixOptions, Screen.YourMix, Screen.TimeUsage, Screen.Top20 -> true
+        Screen.SettingsNavigation, Screen.SettingsTabOrder, Screen.SettingsGestures, Screen.SettingsScan, Screen.SettingsTheme, Screen.SettingsEqualizer, Screen.SettingsPlayback, Screen.SettingsReplayGain, Screen.SettingsMixGeneral, Screen.SettingsMixStrategy, Screen.SettingsMixOptions, Screen.YourMix, Screen.TimeUsage, Screen.Top20 -> true
         else -> false
     }
 

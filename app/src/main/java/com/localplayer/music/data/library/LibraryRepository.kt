@@ -21,6 +21,10 @@ import com.localplayer.music.data.db.TRACK_COLS_T
 import com.localplayer.music.data.db.TrackListItem
 import com.localplayer.music.data.db.VISIBLE
 import com.localplayer.music.data.db.VISIBLE_T
+import com.localplayer.music.data.playlist.M3u
+import com.localplayer.music.data.playlist.M3uCandidate
+import com.localplayer.music.data.playlist.M3uEntry
+import com.localplayer.music.data.playlist.M3uMatcher
 import com.localplayer.music.playback.ArtworkRef
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
@@ -413,6 +417,49 @@ class LibraryRepository(
             albums = albumRows.map(::toAlbum).sortedAlbums(),
             playlists = matchingPlaylists,
         )
+    }
+
+    // --- duplicates (read only when the user opens the screen) ---------------------------------
+
+    suspend fun duplicateGroups(): List<DupGroup> =
+        withContext(Dispatchers.Default) { DuplicateFinder.find(tracks.visibleBriefs()) }
+
+    /** Hides every copy except the one to keep, in each group. Nothing is deleted; "Hidden songs" brings them back. */
+    suspend fun hideDuplicateCopies(groups: List<DupGroup>): List<String> {
+        val hidden = ArrayList<String>()
+        database.withTransaction {
+            val now = System.currentTimeMillis()
+            for (g in groups) for (t in g.tracks) {
+                if (t.id == g.keep.id) continue
+                hiddenDao.hide(HiddenTrackEntity(t.uri, now, t.name, t.sizeBytes))
+                hidden += t.uri
+            }
+        }
+        return hidden
+    }
+
+    // --- playlists as .m3u ------------------------------------------------------------------------
+
+    /** The playlist as .m3u text (file names + #EXTINF), or null for an empty playlist. */
+    suspend fun playlistAsM3u(id: Long): String? {
+        val rows = playlists.exportBriefs(id)
+        if (rows.isEmpty()) return null
+        return M3u.write(rows.map { M3uEntry(it.name ?: it.title, it.title, it.artist, (it.durationMs / 1000).toInt()) })
+    }
+
+    class M3uImport(val playlistId: Long, val added: Int, val missing: Int)
+
+    /** Creates a playlist from .m3u text. Lines that match no song of this library are counted, never guessed. */
+    suspend fun importM3u(name: String, text: String): M3uImport? {
+        val entries = M3u.parse(text)
+        if (entries.isEmpty()) return null
+        val matcher = withContext(Dispatchers.Default) {
+            M3uMatcher(tracks.visibleBriefs().map { M3uCandidate(it.uri, it.name, it.title, it.artist, it.durationMs) })
+        }
+        val uris = entries.mapNotNull { matcher.match(it) }
+        val id = createPlaylist(name)
+        val result = addToPlaylist(id, uris)
+        return M3uImport(id, result.added, entries.size - uris.size)
     }
 
     // --- playlists (app data) -----------------------------------------------------------------

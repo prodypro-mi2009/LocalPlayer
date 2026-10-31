@@ -118,10 +118,38 @@ class LibraryViewModel(private val container: AppContainer) : ViewModel() {
         // Without the media permission the scanner simply does nothing.
         rescan()
         autoCheckForUpdate()
+        autoBackupIfDue()
     }
 
     /**
-     * Periodic update check: at most once a day, only when the user left it on and a repository is configured, and
+     * The two opt-in automatic backups (to a folder; the copy for Android/Google backup): only when the user switched
+     * one on and a week has passed, and a minute after the app opened, never during start-up. Also tells the user once
+     * when a backup copy arrived with Android's restore. All of this is a few cheap checks unless something is due.
+     */
+    private fun autoBackupIfDue() {
+        val backup = container.autoBackup
+        val settings = container.settings
+        val now = System.currentTimeMillis()
+        val folderDue = backup.folderDue(now)
+        val copyDue = backup.androidCopyDue(now)
+        val restored = !settings.restoredCopyNoticed && backup.restoredCopy() != null
+        if (!folderDue && !copyDue && !restored) return
+        viewModelScope.launch {
+            kotlinx.coroutines.delay(60_000)
+            if (restored) {
+                settings.restoredCopyNoticed = true
+                _messages.tryEmit(UiMessage(R.string.backup_restored_found))
+            }
+            val folder = settings.autoBackupFolder.value
+            if (folderDue && !folder.isNullOrEmpty()) {
+                backup.backupToFolder(folder).onFailure { _messages.tryEmit(UiMessage(R.string.backup_auto_failed)) }
+            }
+            if (copyDue) backup.writeAndroidCopy()
+        }
+    }
+
+    /**
+     * Periodic update check: at most once a week, only when the user left it on and a repository is configured, and
      * silent when offline. It only reads the latest release; it never downloads or installs anything by itself.
      */
     private fun autoCheckForUpdate() {
@@ -133,9 +161,9 @@ class LibraryViewModel(private val container: AppContainer) : ViewModel() {
             )
         ) return
         viewModelScope.launch {
-            kotlinx.coroutines.delay(8_000)        // not during app start
+            kotlinx.coroutines.delay(15_000)       // well after app start
             val checker = com.localplayer.music.data.update.UpdateChecker(com.localplayer.music.data.update.AppInfo.userAgent(context))
-            val result = checker.check(repo, com.localplayer.music.data.update.AppInfo.versionName(context))
+            val result = checker.check(repo, com.localplayer.music.data.update.AppInfo.versionName(context), settings.includeBetaUpdates.value)
             if (result is com.localplayer.music.data.update.UpdateCheck.Offline) return@launch   // try again next launch
             settings.lastUpdateCheckAt = System.currentTimeMillis()
             if (result is com.localplayer.music.data.update.UpdateCheck.Newer) {
@@ -312,6 +340,80 @@ class LibraryViewModel(private val container: AppContainer) : ViewModel() {
         viewModelScope.launch { library.unhideAll() }
     }
 
+    // --- duplicate songs (computed only when the screen is opened) ---------------------------------
+
+    private val _duplicates = MutableStateFlow<List<com.localplayer.music.data.library.DupGroup>?>(null)
+    val duplicates: StateFlow<List<com.localplayer.music.data.library.DupGroup>?> = _duplicates.asStateFlow()
+
+    fun findDuplicates() {
+        _duplicates.value = null
+        viewModelScope.launch { _duplicates.value = library.duplicateGroups() }
+    }
+
+    /** Hides the extra copies of every group (or of the groups given); the files stay where they are. */
+    fun hideDuplicateCopies(groups: List<com.localplayer.music.data.library.DupGroup>) {
+        viewModelScope.launch {
+            val uris = library.hideDuplicateCopies(groups)
+            uris.forEach { player.removeAllOfTrack(it) }
+            _messages.tryEmit(UiMessage(R.string.duplicates_hidden, listOf(uris.size.toString())))
+            _duplicates.value = library.duplicateGroups()
+        }
+    }
+
+    // --- playlists as .m3u -----------------------------------------------------------------------
+
+    fun exportPlaylistM3u(id: Long, target: android.net.Uri) {
+        viewModelScope.launch {
+            val ok = withContext(Dispatchers.IO) {
+                runCatching {
+                    val text = library.playlistAsM3u(id) ?: return@runCatching false
+                    container.appContext.contentResolver.openOutputStream(target, "wt")?.use { it.write(text.toByteArray(Charsets.UTF_8)) } != null
+                }.getOrDefault(false)
+            }
+            _messages.tryEmit(UiMessage(if (ok) R.string.m3u_exported else R.string.m3u_export_failed))
+        }
+    }
+
+    fun importPlaylistM3u(source: android.net.Uri) {
+        viewModelScope.launch {
+            val result = runCatching {
+                val text = withContext(Dispatchers.IO) {
+                    container.appContext.contentResolver.openInputStream(source)?.use {
+                        // A playlist is small; anything bigger than 8 MB is not one.
+                        val limit = 8 * 1024 * 1024
+                        val out = java.io.ByteArrayOutputStream()
+                        val buf = ByteArray(16 * 1024)
+                        var total = 0
+                        while (true) {
+                            val n = it.read(buf)
+                            if (n < 0) break
+                            total += n
+                            if (total > limit) return@use null
+                            out.write(buf, 0, n)
+                        }
+                        String(out.toByteArray(), Charsets.UTF_8)
+                    }
+                }
+                val name = withContext(Dispatchers.IO) { displayNameOf(source) }
+                text?.let { library.importM3u(name, it) }
+            }.getOrNull()
+            if (result == null) {
+                _messages.tryEmit(UiMessage(R.string.m3u_import_failed))
+            } else {
+                _messages.tryEmit(UiMessage(R.string.m3u_imported, listOf(result.added.toString(), result.missing.toString())))
+            }
+        }
+    }
+
+    private fun displayNameOf(uri: android.net.Uri): String {
+        val fromProvider = runCatching {
+            container.appContext.contentResolver.query(uri, arrayOf(android.provider.OpenableColumns.DISPLAY_NAME), null, null, null)
+                ?.use { c -> if (c.moveToFirst()) c.getString(0) else null }
+        }.getOrNull()
+        val raw = fromProvider ?: uri.lastPathSegment ?: "Playlist"
+        return raw.substringBeforeLast('.').ifBlank { "Playlist" }
+    }
+
     // --- library folders -----------------------------------------------------------------------
 
     val folderState: StateFlow<FolderState?> = library.folderState().asState()
@@ -476,6 +578,15 @@ class LibraryViewModel(private val container: AppContainer) : ViewModel() {
 
     val settings: AppSettings = container.settings
 
+    /** True when an automatic check found a version newer than the installed one (red dot on the Settings button). */
+    val updateAvailable: StateFlow<Boolean> = container.settings.knownNewer
+        .map { tag ->
+            tag.isNotEmpty() && com.localplayer.music.data.update.VersionCompare.isNewer(
+                tag, com.localplayer.music.data.update.AppInfo.versionName(container.appContext),
+            )
+        }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), false)
+
     fun setUseMediaStoreScanner(enabled: Boolean) {
         settings.setUseMediaStoreScanner(enabled)
         rescan()
@@ -484,6 +595,13 @@ class LibraryViewModel(private val container: AppContainer) : ViewModel() {
     fun setThemeMode(mode: ThemeMode) = settings.setThemeMode(mode)
     fun setDynamicColor(enabled: Boolean) = settings.setDynamicColor(enabled)
     fun setArtworkColors(enabled: Boolean) = settings.setArtworkColors(enabled)
+    fun setArtworkBlur(enabled: Boolean) = settings.setArtworkBlur(enabled)
+    fun setBlurEverywhere(enabled: Boolean) = settings.setBlurEverywhere(enabled)
+    /** Off / colours of the cover / blurred cover (exactly one of them, or none). */
+    fun setArtworkStyle(colors: Boolean, blur: Boolean) {
+        settings.setArtworkColors(colors)
+        settings.setArtworkBlur(blur)
+    }
 
     fun setBackground(uri: Uri) {
         viewModelScope.launch {

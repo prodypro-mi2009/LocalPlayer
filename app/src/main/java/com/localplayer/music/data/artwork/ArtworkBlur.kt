@@ -3,12 +3,17 @@ package com.localplayer.music.data.artwork
 import android.graphics.Bitmap
 
 /**
- * Cheap, safe background blur for the lyrics view: the artwork is first shrunk to a tiny bitmap and blurred
- * there (a few thousand pixels, once), then simply scaled up when drawn. No RenderEffect, no per-frame work,
+ * Cheap, safe background blur (lyrics texture and the "Blurred cover" background): the artwork is first shrunk to a tiny
+ * bitmap and blurred there (a few thousand pixels, once), then simply scaled up when drawn. The blur is light (about 4 %
+ * of the picture width) so the shapes and colours of the cover are still recognisable, and the colours get a small
+ * saturation boost to make up for the veil that is drawn over the picture. No RenderEffect, no per-frame work,
  * no full-resolution bitmap. Any failure returns null and the caller shows a plain dark background.
  */
 object ArtworkBlur {
-    const val SIZE = 40
+    const val SIZE = 64
+    const val RADIUS = 3
+    const val PASSES = 2
+    const val SATURATION = 1.15f
 
     /** The few most recent blurred backgrounds (each is only 40x40 pixels). */
     private val cache = android.util.LruCache<String, Bitmap>(6)
@@ -23,7 +28,7 @@ object ArtworkBlur {
         val pixels = IntArray(SIZE * SIZE)
         small.getPixels(pixels, 0, SIZE, 0, 0, SIZE, SIZE)
         if (small !== source) small.recycle()
-        val blurred = BoxBlur.blur(pixels, SIZE, SIZE, radius = 3, passes = 3)
+        val blurred = Saturation.boost(BoxBlur.blur(pixels, SIZE, SIZE, radius = RADIUS, passes = PASSES), SATURATION)
         Bitmap.createBitmap(blurred, SIZE, SIZE, Bitmap.Config.ARGB_8888)
     } catch (e: Exception) {
         null
@@ -73,5 +78,23 @@ object BoxBlur {
             }
         }
         return out
+    }
+}
+
+/** Plain-JVM saturation change over ARGB int pixels: every channel moves away from the pixel's grey by [factor]. */
+object Saturation {
+    fun boost(pixels: IntArray, factor: Float): IntArray {
+        if (factor == 1f) return pixels
+        return IntArray(pixels.size) { i ->
+            val c = pixels[i]
+            val r = (c shr 16) and 0xFF
+            val g = (c shr 8) and 0xFF
+            val b = c and 0xFF
+            val grey = (r + g + b) / 3f
+            val nr = (grey + (r - grey) * factor).toInt().coerceIn(0, 255)
+            val ng = (grey + (g - grey) * factor).toInt().coerceIn(0, 255)
+            val nb = (grey + (b - grey) * factor).toInt().coerceIn(0, 255)
+            (c and 0xFF000000.toInt()) or (nr shl 16) or (ng shl 8) or nb
+        }
     }
 }

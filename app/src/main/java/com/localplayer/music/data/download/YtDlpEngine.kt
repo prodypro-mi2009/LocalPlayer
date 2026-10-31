@@ -6,8 +6,24 @@ import com.yausername.youtubedl_android.YoutubeDL
 import com.yausername.youtubedl_android.YoutubeDLRequest
 import java.io.File
 
-/** One song found at a link. [artist] may be empty (YouTube did not say). */
-data class FoundSong(val id: String, val title: String, val artist: String)
+/**
+ * One song found at a link. [artist] may be empty (YouTube did not say). [trackNumber] is the song's position in the
+ * YouTube playlist (for an album that IS the track number; null for a single video). [album] is the album name when
+ * YouTube names one (or when the link is a YouTube Music album), otherwise empty.
+ */
+data class FoundSong(
+    val id: String,
+    val title: String,
+    val artist: String,
+    val trackNumber: Int? = null,
+    val album: String = "",
+)
+
+/** What YouTube itself knows about a downloaded song (empty = unknown). */
+data class InfoMeta(val album: String = "", val year: String = "", val trackNumber: Int? = null)
+
+/** A finished download: the MP3 plus whatever YouTube told yt-dlp about it. */
+class DownloadedMp3(val file: File, val info: InfoMeta)
 
 /**
  * The only place that talks to yt-dlp (youtubedl-android: Python + FFmpeg bundled as native libraries).
@@ -34,7 +50,11 @@ object YtDlpEngine {
         request.addOption("--flat-playlist")
         request.addOption("--ignore-errors")
         request.addOption("--no-warnings")
-        request.addOption("--print", "%(id)s\t%(title)s\t%(artist,uploader,channel)s")
+        // id, title, artist, position in the playlist, playlist title, playlist id, album (NA = unknown)
+        request.addOption(
+            "--print",
+            "%(id)s\t%(title)s\t%(artist,uploader,channel)s\t%(playlist_index)s\t%(playlist_title)s\t%(playlist_id)s\t%(album)s",
+        )
         val out = YoutubeDL.getInstance().execute(request, null, null).out
         return parseListing(out)
     }
@@ -56,13 +76,15 @@ object YtDlpEngine {
      * The result is a file in [dir]. If a post-processing step that only matters for the cover fails after the MP3
      * exists, the MP3 is still returned.
      */
-    fun downloadMp3(context: Context, id: String, dir: File, processId: String, onProgress: (Float) -> Unit): File {
+    fun downloadMp3(context: Context, id: String, dir: File, processId: String, onProgress: (Float) -> Unit): DownloadedMp3 {
         ensureInit(context)
         dir.mkdirs()
         val target = File(dir, "$id.mp3")
+        val infoFile = File(dir, "$id.info.json")
         var lastError: Throwable? = null
         for ((index, attempt) in ATTEMPTS.withIndex()) {
             target.delete()
+            infoFile.delete() // yt-dlp does not overwrite an existing info file
             onProgress(0f)
             val request = YoutubeDLRequest("https://www.youtube.com/watch?v=$id")
             for ((option, value) in attempt) request.addOption(option, value)
@@ -71,6 +93,7 @@ object YtDlpEngine {
             request.addOption("--audio-quality", "0")
             request.addOption("--embed-thumbnail")
             request.addOption("--convert-thumbnails", "jpg")
+            request.addOption("--write-info-json") // album / release year as YouTube states them (read after the download)
             request.addOption("--no-playlist")
             request.addOption("--no-mtime")
             request.addOption("--no-warnings")
@@ -90,7 +113,7 @@ object YtDlpEngine {
                     continue
                 }
             }
-            if (target.isFile && target.length() > 0L) return target
+            if (target.isFile && target.length() > 0L) return DownloadedMp3(target, readInfo(infoFile))
             lastError = IllegalStateException("yt-dlp produced no MP3 (attempt ${index + 1})")
         }
         throw lastError ?: IllegalStateException("yt-dlp produced no MP3 for $id")
@@ -127,7 +150,10 @@ object YtDlpEngine {
         return (head + cause).take(600)
     }
 
-    /** Output of --print: one "id TAB title TAB artist" line per entry; missing fields are printed as NA. */
+    /**
+     * Output of --print: one line per entry with these tab-separated columns: id, title, artist, playlist index,
+     * playlist title, playlist id, album. Missing fields are printed as NA (older 3-column lines still work).
+     */
     internal fun parseListing(out: String): List<FoundSong> =
         out.lineSequence()
             .map { it.trim('\r') }
@@ -137,10 +163,57 @@ object YtDlpEngine {
                 val id = parts.getOrNull(0)?.trim().orEmpty()
                 if (id.isEmpty() || id == "NA" || id.contains(' ')) return@mapNotNull null
                 val title = parts.getOrNull(1)?.trim().orEmpty().let { if (it == "NA") "" else it }
-                FoundSong(id, title.ifBlank { id }, cleanArtist(parts.getOrNull(2)))
+                val index = parts.getOrNull(3)?.trim()?.toIntOrNull()?.takeIf { it > 0 }
+                FoundSong(
+                    id = id,
+                    title = title.ifBlank { id },
+                    artist = cleanArtist(parts.getOrNull(2)),
+                    trackNumber = index,
+                    album = albumFor(
+                        album = parts.getOrNull(6),
+                        playlistTitle = parts.getOrNull(4),
+                        playlistId = parts.getOrNull(5),
+                    ),
+                )
             }
             .distinctBy { it.id }
             .toList()
+
+    /** Text from yt-dlp where "NA" / blank mean "unknown". */
+    internal fun known(raw: String?): String = raw?.trim().orEmpty().let { if (it == "NA") "" else it }
+
+    /**
+     * The album name to pre-fill: the song's own album when YouTube gives one; otherwise the playlist title, but ONLY
+     * when the playlist is a YouTube Music album (its id starts with OLAK5uy) - an ordinary playlist's name is not an album.
+     */
+    internal fun albumFor(album: String?, playlistTitle: String?, playlistId: String?): String {
+        known(album).let { if (it.isNotEmpty()) return it }
+        return if (known(playlistId).startsWith("OLAK5uy")) stripAlbumPrefix(known(playlistTitle)) else ""
+    }
+
+    private val ALBUM_PREFIX = Regex("^(album|single|ep|Άλμπουμ|άλμπουμ|Σινγκλ)\\s*[-–—:]\\s+", RegexOption.IGNORE_CASE)
+
+    /** YouTube Music titles album playlists "Album - Name" (also "Single - ", "EP - "); the album itself is just "Name". */
+    internal fun stripAlbumPrefix(title: String): String {
+        val t = title.trim()
+        val stripped = ALBUM_PREFIX.replace(t, "").trim()
+        return stripped.ifEmpty { t }
+    }
+
+    /** Reads the info file yt-dlp wrote next to the MP3. Any problem simply means "nothing known". */
+    internal fun readInfo(file: File): InfoMeta =
+        runCatching { if (file.isFile) parseInfo(file.readText()) else InfoMeta() }.getOrDefault(InfoMeta())
+
+    /** album, release year (release_year, else the year of release_date) and track number from an info JSON text. */
+    internal fun parseInfo(text: String): InfoMeta {
+        val root = com.localplayer.music.data.backup.MiniJson.parse(text) as? Map<*, *> ?: return InfoMeta()
+        val album = known(root["album"] as? String)
+        val releaseYear = (root["release_year"] as? Number)?.toInt()?.takeIf { it in 1000..9999 }?.toString()
+        val releaseDate = (root["release_date"] as? String)?.trim().orEmpty()
+        val yearFromDate = if (releaseDate.length >= 4 && releaseDate.take(4).all { it.isDigit() }) releaseDate.take(4) else ""
+        val track = (root["track_number"] as? Number)?.toInt()?.takeIf { it > 0 }
+        return InfoMeta(album = album, year = releaseYear ?: yearFromDate, trackNumber = track)
+    }
 
     /** "NA" means unknown; YouTube Music channels are called "<Artist> - Topic". */
     internal fun cleanArtist(raw: String?): String {

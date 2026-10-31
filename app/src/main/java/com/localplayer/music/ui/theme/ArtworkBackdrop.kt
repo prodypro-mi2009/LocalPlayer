@@ -29,3 +29,12 @@ fun lyricsVerticalBrush(tone: Color): Brush {
         colorStops = stops.map { (fraction, alpha) -> fraction to tone.copy(alpha = alpha * scale) }.toTypedArray(),
     )
 }
+
+/** Now Playing: the same tone over the whole height (no black block below the artwork). */
+fun nowPlayingVerticalBrush(tone: Color): Brush {
+    val scale = ArtworkGradient.topAlphaFor(tone.luminance()) / ArtworkGradient.TOP_ALPHA
+    val stops = ArtworkGradient.nowPlayingStops()
+    return Brush.verticalGradient(
+        colorStops = stops.map { (fraction, alpha) -> fraction to tone.copy(alpha = alpha * scale) }.toTypedArray(),
+    )
+}

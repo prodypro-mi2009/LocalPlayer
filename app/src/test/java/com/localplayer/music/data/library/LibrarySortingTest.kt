@@ -49,4 +49,22 @@ class LibrarySortingTest {
         )
         assertEquals(listOf("Pop", "Jazz", "Rock"), sorted.map { it.name })
     }
+
+    @Test fun sectionAtIndexFindsTheSectionOfAnyPosition() {
+        // '#' first in the list although it is last in the display order of the letters.
+        val first = AlphabetIndex.firstIndexBySection(listOf("1", "10", "Acapulco", "Alba", "Beach", "Boreas", "Zeta"))
+        val at = AlphabetIndex.sectionAtIndex(first)
+        assertEquals('#', at(0))
+        assertEquals('#', at(1))
+        assertEquals('A', at(2))
+        assertEquals('A', at(3))
+        assertEquals('B', at(4))
+        assertEquals('B', at(5))
+        assertEquals('Z', at(6))
+        assertEquals('Z', at(500))
+    }
+
+    @Test fun sectionAtIndexOfEmptyIsNull() {
+        assertEquals(null, AlphabetIndex.sectionAtIndex(emptyMap())(0))
+    }
 }

@@ -32,8 +32,8 @@ android {
         applicationId = "com.localplayer.music"
         minSdk = 26
         targetSdk = 36
-        versionCode = 27
-        versionName = "1.4.2"
+        versionCode = 52
+        versionName = "1.7.7"
 
         // ARM64 first. There is no native code in this app yet, so this only
         // guarantees that no unneeded architectures are ever packaged.
@@ -111,6 +111,8 @@ ksp {
 
 dependencies {
     implementation("androidx.core:core-ktx:1.17.0")
+    // Installs the baseline profile on devices/installs that do not get it from the store (sideloaded APKs).
+    implementation("androidx.profileinstaller:profileinstaller:1.4.1")
     implementation("androidx.activity:activity-compose:1.11.0")
     implementation("androidx.lifecycle:lifecycle-runtime-compose:2.9.4")
     implementation("androidx.lifecycle:lifecycle-viewmodel-compose:2.9.4")
@@ -118,6 +120,9 @@ dependencies {
 
     val composeBom = platform("androidx.compose:compose-bom:2025.09.00")
     implementation(composeBom)
+    // Keep the runtime aligned with Room's schema serializer (room-migration uses Serialization 1.8.1).
+    // Lifecycle currently requests core 1.7.3; AGP carries main runtime versions into androidTest.
+    implementation(platform("org.jetbrains.kotlinx:kotlinx-serialization-bom:1.8.1"))
     implementation("androidx.compose.ui:ui")
     implementation("androidx.compose.foundation:foundation")
     implementation("androidx.compose.material3:material3")

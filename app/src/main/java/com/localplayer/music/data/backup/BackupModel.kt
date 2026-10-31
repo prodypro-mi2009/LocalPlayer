@@ -18,13 +18,27 @@ object BackupFormat {
     const val SETTINGS_FORMAT = "localplayer-settings"
     const val ARCHIVE_FORMAT = "localplayer-backup"
     const val SCHEMA = 1
+    /** The .lpbackup archive: 2 added library.json and playlist covers. Version 1 archives are still read. */
+    const val ARCHIVE_SCHEMA = 2
+    const val LIBRARY = "library.json"
+    const val COVERS_DIR = "assets/covers/"
+    const val MAX_COVERS = 300
+    const val MAX_LIBRARY_BYTES = 24L * 1024 * 1024
     const val MANIFEST = "manifest.json"
     const val SETTINGS = "settings.json"
     const val BACKGROUND_PATH = "assets/background/background.jpg"
     const val FONT_PATH = "assets/fonts/custom-font.ttf"
-    val ALLOWED_ENTRIES = setOf(MANIFEST, SETTINGS, BACKGROUND_PATH, FONT_PATH)
+    val ALLOWED_ENTRIES = setOf(MANIFEST, SETTINGS, BACKGROUND_PATH, FONT_PATH, LIBRARY)
+
+    /** A cover file name: letters, digits, dot, dash, underscore, ending in .jpg - no path can be smuggled in. */
+    fun isCoverName(name: String): Boolean = Regex("[A-Za-z0-9._-]{1,80}\\.jpg").matches(name) && !name.contains("..")
+
+    fun coverPath(name: String) = COVERS_DIR + name
+
+    fun isAllowedEntry(path: String): Boolean =
+        path in ALLOWED_ENTRIES || (path.startsWith(COVERS_DIR) && isCoverName(path.removePrefix(COVERS_DIR)))
     const val MAX_ENTRY_BYTES = 20L * 1024 * 1024
-    const val MAX_TOTAL_BYTES = 48L * 1024 * 1024
+    const val MAX_TOTAL_BYTES = 64L * 1024 * 1024
     const val MAX_SETTINGS_BYTES = 256L * 1024
 
     class InvalidBackup(message: String) : Exception(message)

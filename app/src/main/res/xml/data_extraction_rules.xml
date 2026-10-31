@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Android 12 and newer: same rule for cloud backup and for phone-to-phone transfer. -->
+<data-extraction-rules>
+    <cloud-backup>
+        <include domain="file" path="auto_backup/" />
+    </cloud-backup>
+    <device-transfer>
+        <include domain="file" path="auto_backup/" />
+    </device-transfer>
+</data-extraction-rules>

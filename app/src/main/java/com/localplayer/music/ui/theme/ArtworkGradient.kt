@@ -68,4 +68,14 @@ object ArtworkGradient {
 
     fun lyricsStops(top: Float = 0.78f, bottom: Float = 0.30f, steps: Int = 8): List<Pair<Float, Float>> =
         (0..steps).map { i -> val f = i.toFloat() / steps; f to lyricsAlpha(f, top, bottom) }
+
+    /**
+     * Now Playing (1.7.0): the tone covers the WHOLE screen and never fades to black, so the colour of the cover is still
+     * there behind the title and the buttons: from [top] at the top to [bottom] at the bottom.
+     */
+    fun nowPlayingAlpha(fraction: Float, top: Float = 0.85f, bottom: Float = 0.50f): Float =
+        top + (bottom - top) * smootherStep(fraction)
+
+    fun nowPlayingStops(top: Float = 0.85f, bottom: Float = 0.50f, steps: Int = 8): List<Pair<Float, Float>> =
+        (0..steps).map { i -> val f = i.toFloat() / steps; f to nowPlayingAlpha(f, top, bottom) }
 }

@@ -7,6 +7,7 @@ import android.media.audiofx.LoudnessEnhancer
 import androidx.media3.common.C
 import androidx.media3.common.MediaItem
 import androidx.media3.common.Player
+import androidx.media3.common.util.UnstableApi
 import androidx.media3.exoplayer.ExoPlayer
 import com.localplayer.music.AppContainer
 import com.localplayer.music.data.effects.EqModel
@@ -39,6 +40,7 @@ sealed interface EqStatus {
  *    with a LoudnessEnhancer; tags are read for the current and the next track only.
  * Call [refresh] after any related setting changed. All calls happen on the main thread.
  */
+@androidx.annotation.OptIn(markerClass = [UnstableApi::class])
 object AudioEffectsHub {
     private var container: AppContainer? = null
     private var player: ExoPlayer? = null
@@ -203,7 +205,7 @@ object AudioEffectsHub {
     private fun setGain(p: ExoPlayer, gainDb: Float?) {
         val plan = ReplayGainMath.plan(gainDb)
         PlaybackVolume.base = plan.volume
-        if (!SleepTimer.isFading) p.volume = plan.volume
+        if (!SleepTimer.isFading) p.volume = plan.volume * PlaybackVolume.fade
         if (plan.boostMb > 0) {
             try {
                 val session = p.audioSessionId
@@ -234,6 +236,6 @@ object AudioEffectsHub {
 
     private fun resetVolume(p: ExoPlayer) {
         PlaybackVolume.base = 1f
-        if (!SleepTimer.isFading) p.volume = 1f
+        if (!SleepTimer.isFading) p.volume = PlaybackVolume.fade
     }
 }

@@ -17,7 +17,9 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.selection.toggleable
+import androidx.compose.foundation.layout.Box
 import androidx.compose.material3.Button
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.LinearProgressIndicator
@@ -281,5 +283,67 @@ private fun FolderSwitchRow(entry: FolderEntry, onChange: (Boolean) -> Unit) {
             )
         }
         Switch(checked = included, onCheckedChange = null, enabled = !lockedByParent)
+    }
+}
+
+
+/**
+ * Settings > Library > Duplicate songs. The check runs only when this screen opens (title + artist + duration, no file is read).
+ * "Hide extra copies" hides all but the biggest file of each group; nothing is deleted, and Hidden songs brings them back.
+ */
+@Composable
+fun DuplicatesScreen(nav: NavState, viewModel: LibraryViewModel) {
+    val groups by viewModel.duplicates.collectAsStateWithLifecycle()
+    androidx.compose.runtime.LaunchedEffect(Unit) { viewModel.findDuplicates() }
+    val list = groups
+    Column(Modifier.fillMaxSize()) {
+        DetailTopBar(
+            title = stringResource(R.string.duplicates_title),
+            onBack = { nav.pop() },
+            actions = {
+                if (!list.isNullOrEmpty()) {
+                    TextButton(onClick = { viewModel.hideDuplicateCopies(list) }) { Text(stringResource(R.string.duplicates_hide_all)) }
+                }
+            },
+        )
+        when {
+            list == null -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { CircularProgressIndicator() }
+            list.isEmpty() -> EmptyState(stringResource(R.string.duplicates_empty), Modifier.fillMaxSize())
+            else -> FadingLazyColumn(Modifier.fillMaxSize(), contentPadding = barPadding(extra = 8.dp)) {
+                item(key = "note") {
+                    Text(
+                        stringResource(R.string.duplicates_note, list.size),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
+                    )
+                }
+                items(list, key = { g -> g.keep.id }) { g ->
+                    Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp)) {
+                        Text(g.keep.title, style = MaterialTheme.typography.bodyLarge, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                        Text(
+                            listOfNotNull(
+                                g.keep.artist,
+                                stringResource(if (g.sameFile) R.string.duplicates_same_file else R.string.duplicates_similar),
+                            ).joinToString(" • "),
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                        for (t in g.tracks) {
+                            val keep = t.id == g.keep.id
+                            Text(
+                                (if (keep) "✓ " else "– ") + (t.name ?: t.title) + "  (" + android.text.format.Formatter.formatShortFileSize(androidx.compose.ui.platform.LocalContext.current, t.sizeBytes) + ")",
+                                style = MaterialTheme.typography.bodySmall,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                                modifier = Modifier.padding(top = 2.dp),
+                            )
+                        }
+                        TextButton(onClick = { viewModel.hideDuplicateCopies(listOf(g)) }) { Text(stringResource(R.string.duplicates_hide_extra)) }
+                    }
+                    HorizontalDivider()
+                }
+            }
+        }
     }
 }

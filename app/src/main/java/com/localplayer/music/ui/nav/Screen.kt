@@ -24,6 +24,10 @@ sealed interface Screen {
     data class EditCover(val trackId: Long) : Screen
     /** Songs the user hid from the library, with "show again". */
     data object HiddenSongs : Screen
+    /** Songs that look like copies of each other; the extra copies can be hidden. */
+    data object Duplicates : Screen
+    /** Same artist / album / genre / year for every song of one album. */
+    data class BulkEditAlbum(val groupKey: String, val title: String) : Screen
     /** Library folders: granted folders, folders switched off, rescan. */
     data object LibraryFolders : Screen
     /** Appearance > Colors (dynamic colors, background, button colors). */
@@ -49,6 +53,7 @@ sealed interface Screen {
     data object SettingsScan : Screen
     data object SettingsTheme : Screen
     data object SettingsEqualizer : Screen
+    data object SettingsPlayback : Screen
     data object SettingsReplayGain : Screen
     data object SettingsMixGeneral : Screen
     data object SettingsMixStrategy : Screen
@@ -81,6 +86,8 @@ fun Screen.encode(): String = when (this) {
     is Screen.EditMetadata -> listOf("edit", trackId.toString()).joinToString(SEP)
     is Screen.EditCover -> listOf("editcover", trackId.toString()).joinToString(SEP)
     Screen.HiddenSongs -> "hidden"
+    Screen.Duplicates -> "duplicates"
+    is Screen.BulkEditAlbum -> listOf("bulkalbum", groupKey, title).joinToString(SEP)
     Screen.LibraryFolders -> "folders"
     Screen.Colors -> "colors"
     Screen.Fonts -> "fonts"
@@ -100,6 +107,7 @@ fun Screen.encode(): String = when (this) {
     Screen.SettingsScan -> "set-scan"
     Screen.SettingsTheme -> "set-theme"
     Screen.SettingsEqualizer -> "set-eq"
+    Screen.SettingsPlayback -> "set-playback"
     Screen.SettingsReplayGain -> "set-rg"
     Screen.SettingsMixGeneral -> "set-mixgeneral"
     Screen.SettingsMixStrategy -> "set-mixstrategy"
@@ -129,6 +137,8 @@ fun decodeScreen(text: String): Screen {
             "edit" -> Screen.EditMetadata(parts[1].toLong())
             "editcover" -> Screen.EditCover(parts[1].toLong())
             "hidden" -> Screen.HiddenSongs
+            "duplicates" -> Screen.Duplicates
+            "bulkalbum" -> Screen.BulkEditAlbum(parts[1], parts.getOrElse(2) { "" })
             "folders" -> Screen.LibraryFolders
             "colors" -> Screen.Colors
             "fonts" -> Screen.Fonts
@@ -148,6 +158,7 @@ fun decodeScreen(text: String): Screen {
             "set-scan" -> Screen.SettingsScan
             "set-theme" -> Screen.SettingsTheme
             "set-eq" -> Screen.SettingsEqualizer
+            "set-playback" -> Screen.SettingsPlayback
             "set-rg" -> Screen.SettingsReplayGain
             "set-mixgeneral" -> Screen.SettingsMixGeneral
             "set-mixstrategy" -> Screen.SettingsMixStrategy

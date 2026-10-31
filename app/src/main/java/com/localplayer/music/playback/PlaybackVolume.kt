@@ -7,4 +7,7 @@ package com.localplayer.music.playback
  */
 object PlaybackVolume {
     @Volatile var base: Float = 1f
+
+    /** 0..1 multiplier of the fade between songs (1 = no fade; only [TrackFader] changes it, and only when that option is on). */
+    @Volatile var fade: Float = 1f
 }

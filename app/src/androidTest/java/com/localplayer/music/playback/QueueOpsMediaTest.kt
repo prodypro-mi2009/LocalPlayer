@@ -305,8 +305,10 @@ class QueueOpsMediaTest {
         QueueOps.insertNextOccurrence(player, item(9))
         // replace with items that still carry a flag and a rank from the old queue
         val dirty = MediaItemFactory.withRank(MediaItemFactory.markPlayNext(item(1)), 4)
-        QueueOps.replaceQueue(player, listOf(dirty, item(2), item(3)), 0, forceShuffle = false)
+        // A previous forceShuffle turns the switch on. Turn it off before replacing so this test
+        // checks that stale ranks are stripped, rather than checking newly assigned shuffle ranks.
         player.shuffleModeEnabled = false
+        QueueOps.replaceQueue(player, listOf(dirty, item(2), item(3)), 0, forceShuffle = false)
         for (i in 0 until player.mediaItemCount) {
             val it = player.getMediaItemAt(i)
             assertFalse(MediaItemFactory.isPlayNext(it))

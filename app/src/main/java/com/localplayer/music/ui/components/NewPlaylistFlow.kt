@@ -40,7 +40,7 @@ private enum class NewPlaylistStep { Choose, Name, ReadingFolder, FolderName, Fo
  * the playlist follows the folder after every library scan.
  */
 @Composable
-fun NewPlaylistFlow(viewModel: LibraryViewModel, onDismiss: () -> Unit) {
+fun NewPlaylistFlow(viewModel: LibraryViewModel, onDismiss: () -> Unit, onOpenDownload: () -> Unit = {}) {
     var step by remember { mutableStateOf(NewPlaylistStep.Choose) }
     var pickedUri by remember { mutableStateOf<Uri?>(null) }
     var analysis by remember { mutableStateOf<FolderAnalysis?>(null) }
@@ -64,6 +64,12 @@ fun NewPlaylistFlow(viewModel: LibraryViewModel, onDismiss: () -> Unit) {
         }
     }
 
+    // .m3u / .m3u8 from any app or folder (the file types of playlists have no single reliable MIME type, so any file can be picked).
+    val m3uPicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+        if (uri != null) viewModel.importPlaylistM3u(uri)
+        onDismiss()
+    }
+
     when (step) {
         NewPlaylistStep.Choose -> AlertDialog(
             onDismissRequest = onDismiss,
@@ -79,6 +85,17 @@ fun NewPlaylistFlow(viewModel: LibraryViewModel, onDismiss: () -> Unit) {
                         Icon(AppIcons.Folder, contentDescription = null, modifier = Modifier.size(20.dp))
                         Spacer(Modifier.width(8.dp))
                         Text(stringResource(R.string.new_playlist_from_folder), modifier = Modifier.weight(1f))
+                    }
+                    TextButton(onClick = { m3uPicker.launch(arrayOf("*/*")) }, modifier = Modifier.fillMaxWidth()) {
+                        Icon(AppIcons.Upload, contentDescription = null, modifier = Modifier.size(20.dp))
+                        Spacer(Modifier.width(8.dp))
+                        Text(stringResource(R.string.m3u_import), modifier = Modifier.weight(1f))
+                    }
+                    // Opens the YouTube download page (yt-dlp) from the settings; the songs it downloads join the library.
+                    TextButton(onClick = onOpenDownload, modifier = Modifier.fillMaxWidth()) {
+                        Icon(AppIcons.Download, contentDescription = null, modifier = Modifier.size(20.dp))
+                        Spacer(Modifier.width(8.dp))
+                        Text(stringResource(R.string.new_playlist_from_youtube), modifier = Modifier.weight(1f))
                     }
                     Text(
                         stringResource(R.string.new_playlist_from_folder_note),

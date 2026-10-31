@@ -136,57 +136,6 @@ fun LibraryActionRow(
     }
 }
 
-/**
- * Fast scrollbar: a column of the letters that occur (Latin, Greek, #). Tap or drag on the thin strip
- * to jump; the rest of the screen is untouched, so normal vertical scrolling is unaffected.
- */
-@Composable
-fun FastScrollbar(
-    letters: List<Char>,
-    onLetter: (Char) -> Unit,
-    modifier: Modifier = Modifier,
-) {
-    if (letters.size < 2) return
-    var heightPx by remember { mutableStateOf(0) }
-    val pick: (Float) -> Unit = { y ->
-        if (heightPx > 0) {
-            val index = ((y / heightPx) * letters.size).toInt().coerceIn(0, letters.lastIndex)
-            onLetter(letters[index])
-        }
-    }
-    Column(
-        modifier = modifier
-            .width(24.dp)
-            .fillMaxHeight()
-            .onSizeChanged { heightPx = it.height }
-            .pointerInput(letters) { detectTapGestures { offset -> pick(offset.y) } }
-            .pointerInput(letters) {
-                detectVerticalDragGestures(
-                    onDragStart = { offset -> pick(offset.y) },
-                    onVerticalDrag = { change, _ ->
-                        change.consume()
-                        pick(change.position.y)
-                    },
-                )
-            },
-        horizontalAlignment = Alignment.CenterHorizontally,
-    ) {
-        letters.forEach { letter ->
-            Box(Modifier.weight(1f).fillMaxWidth(), contentAlignment = Alignment.Center) {
-                Text(
-                    text = letter.toString(),
-                    fontSize = 10.sp,
-                    lineHeight = 10.sp,
-                    fontWeight = FontWeight.Bold,
-                    color = MaterialTheme.colorScheme.primary,
-                    textAlign = TextAlign.Center,
-                    maxLines = 1,
-                )
-            }
-        }
-    }
-}
-
 /** A song as a grid card (Songs tab in grid mode). */
 @Composable
 fun SongGridCard(

@@ -69,7 +69,13 @@ class AppContainer(val appContext: Context) {
     }
     val audioSpecs: AudioSpecReader by lazy { AudioSpecReader(appContext) }
     val settingsBackup: com.localplayer.music.data.backup.SettingsBackupManager by lazy {
-        com.localplayer.music.data.backup.SettingsBackupManager(appContext, settings, background, customFont)
+        com.localplayer.music.data.backup.SettingsBackupManager(appContext, settings, background, customFont, libraryBackup)
+    }
+    val libraryBackup: com.localplayer.music.data.backup.LibraryBackupManager by lazy {
+        com.localplayer.music.data.backup.LibraryBackupManager(appContext, database, library, playlistCovers)
+    }
+    val autoBackup: com.localplayer.music.data.backup.AutoBackupManager by lazy {
+        com.localplayer.music.data.backup.AutoBackupManager(appContext, settings, settingsBackup)
     }
     val background: BackgroundRepository by lazy { BackgroundRepository(appContext, settings) }
     val customFont: com.localplayer.music.data.artwork.CustomFontRepository by lazy {

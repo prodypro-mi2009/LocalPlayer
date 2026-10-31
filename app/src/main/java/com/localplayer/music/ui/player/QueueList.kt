@@ -34,6 +34,7 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.State
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
@@ -369,18 +370,26 @@ fun QueueList(
 private fun PlayingBars(playing: Boolean, size: androidx.compose.ui.unit.Dp) {
     val color = MaterialTheme.colorScheme.primary
     val animate = playing && !LocalReduceMotion.current
-    val transition = rememberInfiniteTransition(label = "playingBars")
-    val a by transition.animateFloat(0.25f, 1f, infiniteRepeatable(tween(520, easing = LinearEasing), RepeatMode.Reverse), label = "a")
-    val b by transition.animateFloat(0.3f, 1f, infiniteRepeatable(tween(410, easing = LinearEasing), RepeatMode.Reverse), label = "b")
-    val c by transition.animateFloat(0.2f, 0.9f, infiniteRepeatable(tween(630, easing = LinearEasing), RepeatMode.Reverse), label = "c")
+    // The infinite transition exists ONLY while the bars dance: when paused (or with animations off) nothing wakes
+    // up every frame any more.
+    val dance: List<State<Float>>? = if (animate) {
+        val transition = rememberInfiniteTransition(label = "playingBars")
+        listOf(
+            transition.animateFloat(0.25f, 1f, infiniteRepeatable(tween(520, easing = LinearEasing), RepeatMode.Reverse), label = "a"),
+            transition.animateFloat(0.3f, 1f, infiniteRepeatable(tween(410, easing = LinearEasing), RepeatMode.Reverse), label = "b"),
+            transition.animateFloat(0.2f, 0.9f, infiniteRepeatable(tween(630, easing = LinearEasing), RepeatMode.Reverse), label = "c"),
+        )
+    } else {
+        null
+    }
     Canvas(Modifier.size(size)) {
         val barW = this.size.width * 0.16f
         val gap = this.size.width * 0.10f
         val startX = (this.size.width - (barW * 3 + gap * 2)) / 2f
         val bottom = this.size.height * 0.8f
-        val heights = if (animate) floatArrayOf(a, b, c) else floatArrayOf(0.55f, 0.9f, 0.4f)
         for (i in 0..2) {
-            val h = this.size.height * 0.6f * heights[i]
+            val fraction = dance?.get(i)?.value ?: STILL_BARS[i]
+            val h = this.size.height * 0.6f * fraction
             drawRoundRect(
                 color = color,
                 topLeft = Offset(startX + i * (barW + gap), bottom - h),
@@ -390,3 +399,5 @@ private fun PlayingBars(playing: Boolean, size: androidx.compose.ui.unit.Dp) {
         }
     }
 }
+
+private val STILL_BARS = floatArrayOf(0.55f, 0.9f, 0.4f)

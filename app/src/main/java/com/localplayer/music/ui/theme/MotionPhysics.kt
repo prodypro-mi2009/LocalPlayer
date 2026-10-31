@@ -107,15 +107,24 @@ object QueueSheetMotion {
 }
 
 /**
- * The mini player IS the sheet: dragging it up grows that same rounded rectangle. Phase 1 (progress 0..[NAV_START]):
- * the top edge rises from the mini player's top to the screen top while the bottom edge stays at the mini player's
- * bottom, side margin and corners opening. Phase 2 (after [NAV_START]): the bottom edge pushes down over the tab
- * bar, which is shoved off the screen by exactly the distance the edge travels ([Frame.navShift]).
- * progress = 1 - offset/extent (0 = closed in the mini player, 1 = full screen).
+ * The mini player IS the sheet: dragging it up grows that same rounded rectangle. Both edges move together, the
+ * bottom one more slowly (progress = 1 - offset/extent; 0 = closed in the mini player, 1 = full screen):
+ *  - the top edge rises from the mini player's top to the screen top, finishing at [TOP_DONE] of the gesture;
+ *  - the bottom edge leaves the mini player's bottom and is pushed down over the tab bar (which is shoved off the
+ *    screen by exactly the distance the edge travels, [Frame.navShift]). It starts gently, speeds up and settles
+ *    smoothly, and has fully covered the bottom when the top edge is at [BOTTOM_AT_TOP] of its own way
+ *    (e.g. top 50 % -> bottom ~23 %, top 90 % -> bottom 100 %);
+ *  - the corners are big and stay round until about the middle of the gesture, then relax to square at the end.
  */
 object SheetMorph {
-    /** Share of the gesture at which the top edge reaches the screen top and the tab bar starts to be pushed. */
-    const val NAV_START = 0.68f
+    /** Share of the gesture at which the top edge reaches the screen top. */
+    const val TOP_DONE = 0.85f
+
+    /** The bottom edge has fully covered the bottom of the screen when the top edge has covered this share of its way. */
+    const val BOTTOM_AT_TOP = 0.9f
+
+    /** Progress from which the big corners start to relax towards square (reaching 0 at the end). */
+    const val CORNER_RELAX_FROM = 0.55f
 
     /** Share of the gesture over which the sheet fades in over the (identical-looking) mini player. */
     const val FADE_DONE_AT = 0.25f
@@ -133,12 +142,19 @@ object SheetMorph {
 
     fun fade(progress: Float): Float = smooth(progress / FADE_DONE_AT)
 
+    /** How far (0..1) the bottom edge has travelled when the top edge has travelled [topShare] (0..1) of its way. */
+    fun bottomShare(topShare: Float): Float {
+        val t = (topShare / BOTTOM_AT_TOP).coerceIn(0f, 1f)
+        return smooth(t * t)
+    }
+
     fun frame(progress: Float, height: Float, miniTop: Float, miniBottom: Float, insetPx: Float, cornerPx: Float): Frame {
-        val g = (progress / NAV_START).coerceIn(0f, 1f)
-        val n = smooth((progress - NAV_START) / (1f - NAV_START))
-        val top = miniTop + (0f - miniTop) * g
+        val g = (progress / TOP_DONE).coerceIn(0f, 1f)
+        val n = bottomShare(g)
+        val top = miniTop * (1f - g)
         val bottom = miniBottom + (height - miniBottom) * n
-        val shape = 1f - smooth(g)
-        return Frame(top, bottom, insetPx * shape, cornerPx * shape, bottom - miniBottom)
+        val inset = insetPx * (1f - smooth(g))
+        val corner = cornerPx * (1f - smooth((progress - CORNER_RELAX_FROM) / (1f - CORNER_RELAX_FROM)))
+        return Frame(top, bottom, inset, corner, bottom - miniBottom)
     }
 }

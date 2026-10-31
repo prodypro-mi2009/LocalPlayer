@@ -186,7 +186,27 @@ fun AlbumScreen(screen: Screen.Album, nav: NavState, viewModel: LibraryViewModel
 
     Box(Modifier.fillMaxSize()) {
     Column(Modifier.fillMaxSize()) {
-        DetailTopBar(title = title, onBack = { nav.pop() }, onSettings = { nav.push(Screen.Settings) })
+        var albumMenu by androidx.compose.runtime.remember { androidx.compose.runtime.mutableStateOf(false) }
+        DetailTopBar(
+            title = title,
+            onBack = { nav.pop() },
+            onSettings = { nav.push(Screen.Settings) },
+            actions = {
+                if (list.isNotEmpty()) {
+                    Box {
+                        androidx.compose.material3.IconButton(onClick = { albumMenu = true }) {
+                            androidx.compose.material3.Icon(com.localplayer.music.ui.components.AppIcons.MoreVert, contentDescription = stringResource(R.string.more_options))
+                        }
+                        androidx.compose.material3.DropdownMenu(expanded = albumMenu, onDismissRequest = { albumMenu = false }) {
+                            androidx.compose.material3.DropdownMenuItem(
+                                text = { Text(stringResource(R.string.bulk_edit_title)) },
+                                onClick = { albumMenu = false; nav.push(Screen.BulkEditAlbum(screen.groupKey, screen.title)) },
+                            )
+                        }
+                    }
+                }
+            },
+        )
         if (tracks != null && list.isEmpty()) {
             EmptyState(stringResource(R.string.empty_library))
             return@Column

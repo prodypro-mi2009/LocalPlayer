@@ -32,6 +32,7 @@ import androidx.compose.foundation.gestures.rememberDraggableState
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.graphics.graphicsLayer
 import com.localplayer.music.ui.components.FloatingEdgeHighlight
+import com.localplayer.music.ui.components.drawBlurredCover
 import com.localplayer.music.ui.player.rememberPlayerSheetState
 import com.localplayer.music.ui.theme.LocalReduceMotion
 import com.localplayer.music.ui.theme.rememberHaptics
@@ -71,7 +72,9 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.rememberSwipeToDismissBoxState
 import androidx.compose.runtime.Composable
 import androidx.compose.foundation.pager.rememberPagerState
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
@@ -130,7 +133,10 @@ import com.localplayer.music.ui.screens.AlbumScreen
 import com.localplayer.music.ui.screens.ArtistScreen
 import com.localplayer.music.ui.screens.EditCoverScreen
 import com.localplayer.music.ui.screens.EditMetadataScreen
+import com.localplayer.music.ui.screens.BulkEditScreen
+import com.localplayer.music.ui.screens.DuplicatesScreen
 import com.localplayer.music.ui.screens.HiddenSongsScreen
+import com.localplayer.music.ui.screens.PlaybackSettingsScreen
 import com.localplayer.music.ui.screens.ColorsScreen
 import com.localplayer.music.ui.screens.FontsScreen
 import com.localplayer.music.ui.screens.LibraryFoldersScreen
@@ -330,15 +336,28 @@ private fun LibraryRoot(viewModel: LibraryViewModel) {
     // remembered in [leavingScreen]); the previous screen is composed by the normal back transition at commit.
     val backProgress = remember { Animatable(0f) }
     var leavingScreen by remember { mutableStateOf<Screen?>(null) }
+    // True only while a back gesture is in progress (or settling back after a cancel): the "previous screen" underlay
+    // is drawn only then. It used to follow [leavingScreen], which stays set ~380 ms after a committed back, so opening a
+    // screen right after a back composed the previous screen twice (underlay + transition) -> "Key ... was used multiple times".
+    var underlayOn by remember { mutableStateOf(false) }
+    // Keys of the screens the transition below currently holds in composition (the current one and any still animating out).
+    val heldKeys = remember { mutableStateListOf<String>() }
+    // The reset that follows a back gesture; a new gesture or a new push cancels it so it cannot clear fresh state.
+    val backCleanup = remember { arrayOfNulls<kotlinx.coroutines.Job>(1) }
     PredictiveBackHandler(enabled = nav.stack.size > 1) { progress ->
+        backCleanup[0]?.cancel()
+        backCleanup[0] = null
+        backProgress.snapTo(0f)
         leavingScreen = nav.current
+        underlayOn = true
         navMotion.forward = false
         try {
             progress.collect { backProgress.snapTo(it.progress) }
             // Committed: the card slides the rest of the way out while the previous screen shows underneath.
             navMotion.pendingSkipExit = false
+            underlayOn = false
             nav.pop()
-            scope.launch {
+            backCleanup[0] = scope.launch {
                 // 1.0 = where the finger can take it (60 % of the width); 1.75 = fully off screen.
                 backProgress.animateTo(1.75f, tween(Motion.SCREEN_BACK_MS, easing = Motion.EaseOut))
                 delay(120) // let the leaving screen be removed before the transform is reset
@@ -346,9 +365,10 @@ private fun LibraryRoot(viewModel: LibraryViewModel) {
                 backProgress.snapTo(0f)
             }
         } catch (e: CancellationException) {
-            scope.launch {
+            backCleanup[0] = scope.launch {
                 backProgress.animateTo(0f, Motion.SettleCritical)
                 leavingScreen = null
+                underlayOn = false
             }
             throw e
         }
@@ -378,6 +398,15 @@ private fun LibraryRoot(viewModel: LibraryViewModel) {
         (knownKeys - stackKeys).forEach { stateHolder.removeState(it) }
         knownKeys = stackKeys
     }
+    // Opening a screen (also the one that was just left) right after a back: drop the left-over card transform at once.
+    LaunchedEffect(nav.current) {
+        if (!underlayOn && navMotion.forward && leavingScreen != null) {
+            backCleanup[0]?.cancel()
+            backCleanup[0] = null
+            leavingScreen = null
+            backProgress.snapTo(0f)
+        }
+    }
     LaunchedEffect(searchOpen) {
         if (searchWasOpen && !searchOpen) viewModel.setSearchQuery("")
         searchWasOpen = searchOpen
@@ -388,6 +417,14 @@ private fun LibraryRoot(viewModel: LibraryViewModel) {
     val pureMode = com.localplayer.music.ui.theme.LocalPureMode.current
     // Pure black / white: no artwork colours and no background picture, just the one uniform colour.
     val tone by rememberArtworkTone(playerState.nowPlaying?.artwork, artworkColors && !pureMode.isOn)
+    // "Blurred cover": the picture is made only when this choice is on AND something shows it (Now Playing is open,
+    // or the user also wants it behind the whole app). Otherwise nothing is loaded or blurred.
+    val artworkBlur by container.settings.artworkBlur.collectAsStateWithLifecycle()
+    val blurEverywhere by container.settings.blurEverywhere.collectAsStateWithLifecycle()
+    val blurOn = artworkBlur && !pureMode.isOn
+    val blurred = com.localplayer.music.ui.components.rememberBlurredArtwork(
+        if (blurOn && (blurEverywhere || sheet.isComposed || nav.current == Screen.Lyrics)) playerState.nowPlaying?.artwork else null,
+    )
     val backdropBase = animateColorAsState(
         targetValue = tone ?: com.localplayer.music.ui.theme.fallbackTint(),
         animationSpec = Motion.AmbientTint,
@@ -416,7 +453,9 @@ private fun LibraryRoot(viewModel: LibraryViewModel) {
         // ONE continuous tonal backdrop for the whole window, status bar included. Every screen's top
         // controls sit on this same layer, so there is no separate strip behind the Settings button and nothing is
         // re-drawn when the tab changes. Same hue in every stop (see ArtworkGradient): no grey smear.
-        Box(
+        if (blurOn && blurEverywhere) {
+            com.localplayer.music.ui.components.BlurredCoverBackground(blurred, com.localplayer.music.ui.components.APP_BLUR_VEIL)
+        } else Box(
             Modifier.fillMaxSize().drawBehind {
                 drawRect(
                     artworkVerticalBrush(
@@ -454,7 +493,7 @@ private fun LibraryRoot(viewModel: LibraryViewModel) {
                         Screen.Recent -> RecentScreen(nav, viewModel, menu)
                         Screen.Settings -> SettingsScreen(nav, viewModel)
                         Screen.Queue -> QueueScreen(nav, viewModel, feedback)
-                        Screen.Lyrics -> LyricsScreen(nav, viewModel, tone)
+                        Screen.Lyrics -> LyricsScreen(nav, viewModel, tone, blurMode = blurOn, blurredCover = blurred)
                         is Screen.LyricsEditor -> LyricsEditorScreen(screen.trackId, nav, viewModel, container)
                         is Screen.LyricsSearch -> LyricsSearchScreen(screen.trackId, nav, viewModel, container)
                         is Screen.Artist -> ArtistScreen(screen, nav, viewModel, menu)
@@ -466,6 +505,8 @@ private fun LibraryRoot(viewModel: LibraryViewModel) {
                         is Screen.EditMetadata -> EditMetadataScreen(screen.trackId, nav, container)
                         is Screen.EditCover -> EditCoverScreen(screen.trackId, nav, container)
                         Screen.HiddenSongs -> HiddenSongsScreen(nav, viewModel)
+                        Screen.Duplicates -> DuplicatesScreen(nav, viewModel)
+                        is Screen.BulkEditAlbum -> BulkEditScreen(screen, nav, container)
                         Screen.LibraryFolders -> LibraryFoldersScreen(nav, viewModel)
                         Screen.Colors -> ColorsScreen(nav, viewModel)
                         Screen.Fonts -> FontsScreen(nav, viewModel)
@@ -485,6 +526,7 @@ private fun LibraryRoot(viewModel: LibraryViewModel) {
                         Screen.SettingsScan -> ScanSettingsScreen(nav, viewModel)
                         Screen.SettingsTheme -> ThemeSettingsScreen(nav, viewModel)
                         Screen.SettingsEqualizer -> EqualizerSettingsScreen(nav, viewModel)
+                        Screen.SettingsPlayback -> PlaybackSettingsScreen(nav, viewModel)
                         Screen.SettingsReplayGain -> ReplayGainSettingsScreen(nav, viewModel)
                         Screen.SettingsMixGeneral -> MixGeneralSettingsScreen(nav, viewModel)
                         Screen.SettingsMixStrategy -> MixStrategySettingsScreen(nav, viewModel)
@@ -498,8 +540,8 @@ private fun LibraryRoot(viewModel: LibraryViewModel) {
             // During a back gesture the previous screen must already be visible underneath the shrinking card (it used to
             // be composed only at commit, so the user first saw an empty backdrop). It is removed in the same frame in which
             // the normal back transition composes it (same save key, so scroll/tab state is handed over).
-            val underlay: Screen? = if (leavingScreen != null && leavingScreen == nav.current && nav.stack.size > 1)
-                nav.stack[nav.stack.size - 2] else null
+            val underlay: Screen? = if (underlayOn && leavingScreen != null && leavingScreen == nav.current && nav.stack.size > 1)
+                nav.stack[nav.stack.size - 2].takeIf { it.encode() !in heldKeys } else null
             if (underlay != null) {
                 Box(Modifier.fillMaxSize()) { renderScreen(underlay) }
             }
@@ -529,6 +571,11 @@ private fun LibraryRoot(viewModel: LibraryViewModel) {
                 // Card look for the screen being left by a back gesture (and by the back button): corners, shadow and an
                 // opaque base appear as soon as it starts to move; every other screen is untouched.
                 val base = MaterialTheme.colorScheme.background
+                val heldKey = screen.encode()
+                DisposableEffect(heldKey) {
+                    heldKeys.add(heldKey)
+                    onDispose { heldKeys.remove(heldKey) }
+                }
                 Box(
                     Modifier
                         .fillMaxSize()
@@ -550,15 +597,23 @@ private fun LibraryRoot(viewModel: LibraryViewModel) {
                             // screen (already composed underneath) can never show through it before it moves away.
                             if (screen == leavingScreen || (screen != nav.current && !navMotion.forward)) {
                                 drawRect(base)
-                                // Same tonal gradient the window backdrop draws, so the card looks exactly like the
-                                // page did a moment ago instead of turning plain black.
-                                drawRect(
-                                    artworkVerticalBrush(
-                                        tone = backdropBase.value,
-                                        strength = 0.45f,
-                                        endY = 420.dp.toPx() / ArtworkGradient.FADE_END,
-                                    ),
-                                )
+                                if (blurOn && blurEverywhere) {
+                                    // "Blurred cover behind the whole app": the card shows the same picture and veil.
+                                    drawBlurredCover(
+                                        blurred,
+                                        base.copy(alpha = com.localplayer.music.ui.components.APP_BLUR_VEIL),
+                                    )
+                                } else {
+                                    // Same tonal gradient the window backdrop draws, so the card looks exactly like the
+                                    // page did a moment ago instead of turning plain black.
+                                    drawRect(
+                                        artworkVerticalBrush(
+                                            tone = backdropBase.value,
+                                            strength = 0.45f,
+                                            endY = 420.dp.toPx() / ArtworkGradient.FADE_END,
+                                        ),
+                                    )
+                                }
                             }
                         },
                 ) {
@@ -576,8 +631,9 @@ private fun LibraryRoot(viewModel: LibraryViewModel) {
                 .align(Alignment.BottomCenter)
                 .fillMaxWidth()
                 .graphicsLayer {
-                    // The tab bar (with the mini player it carries) is pushed off the screen by the growing sheet, but only
-                    // once the sheet's top edge has reached the screen top (SheetMorph.NAV_START). Draw phase only.
+                    // The tab bar (with the mini player it carries) is pushed off the screen by the sheet's bottom edge, which
+                    // eases down while the top edge rises and has covered it when the top is at 90 % (see SheetMorph).
+                    // Draw phase only.
                     if (!reduceMotion) {
                         val p = SheetMorph.progress(sheet.offsetPx.value, sheet.extentPx)
                         val mb = miniBottomPx.takeIf { it > 0f } ?: (sheet.extentPx - size.height * 0.5f)
@@ -737,6 +793,8 @@ private fun LibraryRoot(viewModel: LibraryViewModel) {
             miniBottomPx = { miniBottomPx },
             viewModel = viewModel,
             tone = tone,
+            blurMode = blurOn,
+            blurred = blurred,
             sheet = sheet,
             onDismiss = { sheet.close() },
             // Queue and Lyrics are singleton screens (NavRules): opening them again returns to the existing entry

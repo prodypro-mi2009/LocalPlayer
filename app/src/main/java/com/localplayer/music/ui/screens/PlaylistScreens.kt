@@ -144,6 +144,10 @@ fun PlaylistScreen(screen: Screen.Playlist, nav: NavState, viewModel: LibraryVie
     ) { uri -> if (uri != null) viewModel.setPlaylistCover(screen.id, uri) }
     val list = tracks.orEmpty()
     val name = playlist?.name.orEmpty()
+    // Save the playlist as .m3u: the system "save as" dialog; nothing is written until the user picks a place.
+    val m3uSaver = androidx.activity.compose.rememberLauncherForActivityResult(
+        androidx.activity.result.contract.ActivityResultContracts.CreateDocument("audio/x-mpegurl"),
+    ) { uri -> if (uri != null) viewModel.exportPlaylistM3u(screen.id, uri) }
 
     // "Edit order" mode: rows get a drag handle (and a remove button); everything else is as in a normal list.
     var editing by remember { mutableStateOf(false) }
@@ -252,6 +256,12 @@ fun PlaylistScreen(screen: Screen.Playlist, nav: NavState, viewModel: LibraryVie
                             DropdownMenuItem(
                                 text = { Text(stringResource(R.string.remove_playlist_cover)) },
                                 onClick = { menuOpen = false; viewModel.removePlaylistCover(screen.id) },
+                            )
+                        }
+                        if (list.isNotEmpty()) {
+                            DropdownMenuItem(
+                                text = { Text(stringResource(R.string.m3u_export)) },
+                                onClick = { menuOpen = false; m3uSaver.launch(name.ifBlank { "Playlist" } + ".m3u") },
                             )
                         }
                         DropdownMenuItem(

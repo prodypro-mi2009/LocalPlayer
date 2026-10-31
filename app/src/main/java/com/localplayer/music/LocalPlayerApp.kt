@@ -11,5 +11,7 @@ class LocalPlayerApp : Application() {
         super.onCreate()
         // Tag library setup (Android image handling, exact-text options). Cheap and does no file I/O.
         FileTagEngine.configure(android = true)
+        // Opt-in crash reports (Settings > About): a single File.exists() when off.
+        com.localplayer.music.util.CrashReports.installIfEnabled(this)
     }
 }

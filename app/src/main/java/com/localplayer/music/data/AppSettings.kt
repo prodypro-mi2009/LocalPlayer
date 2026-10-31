@@ -56,9 +56,35 @@ class AppSettings(context: Context) {
     /** Derive player colors from the current album artwork. */
     val artworkColors: StateFlow<Boolean> = _artworkColors.asStateFlow()
 
+    /** Colours of the cover and the blurred cover exclude each other: switching one on switches the other off. */
     fun setArtworkColors(enabled: Boolean) {
         prefs.edit().putBoolean(KEY_ARTWORK_COLORS, enabled).apply()
         _artworkColors.value = enabled
+        if (enabled) setArtworkBlur(false)
+    }
+
+    private val _artworkBlur = MutableStateFlow(prefs.getBoolean(KEY_ARTWORK_BLUR, false) && !_artworkColors.value)
+    /** The blurred cover as the background of Now Playing (off by default; when on, no colour is extracted at all). */
+    val artworkBlur: StateFlow<Boolean> = _artworkBlur.asStateFlow()
+
+    fun setArtworkBlur(enabled: Boolean) {
+        if (_artworkBlur.value != enabled) {
+            prefs.edit().putBoolean(KEY_ARTWORK_BLUR, enabled).apply()
+            _artworkBlur.value = enabled
+        }
+        if (enabled && _artworkColors.value) {
+            prefs.edit().putBoolean(KEY_ARTWORK_COLORS, false).apply()
+            _artworkColors.value = false
+        }
+    }
+
+    private val _blurEverywhere = MutableStateFlow(prefs.getBoolean(KEY_BLUR_EVERYWHERE, false))
+    /** With the blurred cover on: also use it behind the rest of the app (off = only Now Playing). */
+    val blurEverywhere: StateFlow<Boolean> = _blurEverywhere.asStateFlow()
+
+    fun setBlurEverywhere(enabled: Boolean) {
+        prefs.edit().putBoolean(KEY_BLUR_EVERYWHERE, enabled).apply()
+        _blurEverywhere.value = enabled
     }
 
     private val _backgroundVersion = MutableStateFlow(prefs.getLong(KEY_BACKGROUND, 0L))
@@ -168,14 +194,122 @@ class AppSettings(context: Context) {
             prefs.edit().apply { if (value == null) remove(KEY_MIX_SNAPSHOT) else putString(KEY_MIX_SNAPSHOT, value.serialize()) }.apply()
         }
 
-    private val _autoUpdateCheck = MutableStateFlow(prefs.getBoolean(KEY_AUTO_UPDATE, true))
-    /** Check GitHub Releases for a newer version at most once a day after the app opens. */
+    private val _autoUpdateCheck = MutableStateFlow(prefs.getBoolean(KEY_AUTO_UPDATE, false))
+    /** Check GitHub Releases for a newer version at most once a week, 15 s after the app opens. Off by default. */
     val autoUpdateCheck: StateFlow<Boolean> = _autoUpdateCheck.asStateFlow()
 
     fun setAutoUpdateCheck(value: Boolean) {
         prefs.edit().putBoolean(KEY_AUTO_UPDATE, value).apply()
         _autoUpdateCheck.value = value
     }
+
+    private val _includeBetaUpdates = MutableStateFlow(prefs.getBoolean(KEY_BETA_UPDATES, false))
+    /** Also offer GitHub pre-releases (betas) when checking for updates. Off by default. */
+    val includeBetaUpdates: StateFlow<Boolean> = _includeBetaUpdates.asStateFlow()
+
+    fun setIncludeBetaUpdates(value: Boolean) {
+        prefs.edit().putBoolean(KEY_BETA_UPDATES, value).apply()
+        _includeBetaUpdates.value = value
+    }
+
+    // ---- playback and lyrics options of 1.6 (per device, not part of a settings backup) ----
+
+    private val _restoreQueue = MutableStateFlow(prefs.getBoolean(KEY_RESTORE_QUEUE, true))
+    /** Put the queue and the position back after the app was closed. ON by default (it always worked this way). */
+    val restoreQueue: StateFlow<Boolean> = _restoreQueue.asStateFlow()
+
+    fun setRestoreQueue(value: Boolean) {
+        prefs.edit().putBoolean(KEY_RESTORE_QUEUE, value).apply()
+        _restoreQueue.value = value
+    }
+
+    private val _fadeBetweenSongs = MutableStateFlow(prefs.getBoolean(KEY_FADE, false))
+    /** Fade out at the end of a song and fade in the next one. Off by default. */
+    val fadeBetweenSongs: StateFlow<Boolean> = _fadeBetweenSongs.asStateFlow()
+
+    fun setFadeBetweenSongs(value: Boolean) {
+        prefs.edit().putBoolean(KEY_FADE, value).apply()
+        _fadeBetweenSongs.value = value
+    }
+
+    private val _fadeSeconds = MutableStateFlow(com.localplayer.music.playback.FadeMath.clampSeconds(
+        prefs.getInt(KEY_FADE_SECONDS, com.localplayer.music.playback.FadeMath.DEFAULT_SECONDS),
+    ))
+    val fadeSeconds: StateFlow<Int> = _fadeSeconds.asStateFlow()
+
+    fun setFadeSeconds(value: Int) {
+        val v = com.localplayer.music.playback.FadeMath.clampSeconds(value)
+        prefs.edit().putInt(KEY_FADE_SECONDS, v).apply()
+        _fadeSeconds.value = v
+    }
+
+    private val _lyricsInPlayer = MutableStateFlow(prefs.getBoolean(KEY_LYRICS_IN_PLAYER, false))
+    /** Show the current lyric line above the progress bar in Now Playing (synchronized lyrics only). Off by default. */
+    val lyricsInPlayer: StateFlow<Boolean> = _lyricsInPlayer.asStateFlow()
+
+    fun setLyricsInPlayer(value: Boolean) {
+        prefs.edit().putBoolean(KEY_LYRICS_IN_PLAYER, value).apply()
+        _lyricsInPlayer.value = value
+    }
+
+    private val _lyricsFill = MutableStateFlow(prefs.getBoolean(KEY_LYRICS_FILL, false))
+    /** The active lyric line fills with colour across its length (an estimate from the line's duration). Off by default. */
+    val lyricsFill: StateFlow<Boolean> = _lyricsFill.asStateFlow()
+
+    fun setLyricsFill(value: Boolean) {
+        prefs.edit().putBoolean(KEY_LYRICS_FILL, value).apply()
+        _lyricsFill.value = value
+    }
+
+    // ---- automatic backups (opt-in, device-specific: deliberately NOT part of a settings backup) ----
+
+    private val _autoBackupEnabled = MutableStateFlow(prefs.getBoolean(KEY_AUTO_BACKUP, false))
+    /** Weekly complete backup into [autoBackupFolder], made a minute after the app opens. Off by default. */
+    val autoBackupEnabled: StateFlow<Boolean> = _autoBackupEnabled.asStateFlow()
+
+    fun setAutoBackupEnabled(value: Boolean) {
+        prefs.edit().putBoolean(KEY_AUTO_BACKUP, value).apply()
+        _autoBackupEnabled.value = value
+    }
+
+    private val _autoBackupFolder = MutableStateFlow(prefs.getString(KEY_AUTO_BACKUP_FOLDER, null))
+    /** Tree URI of the folder for automatic backups, or null. */
+    val autoBackupFolder: StateFlow<String?> = _autoBackupFolder.asStateFlow()
+
+    fun setAutoBackupFolder(uri: String?) {
+        prefs.edit().apply { if (uri == null) remove(KEY_AUTO_BACKUP_FOLDER) else putString(KEY_AUTO_BACKUP_FOLDER, uri) }.apply()
+        _autoBackupFolder.value = uri
+    }
+
+    private val _androidBackupCopy = MutableStateFlow(prefs.getBoolean(KEY_ANDROID_COPY, false))
+    /** Keep a copy of the complete backup inside the app so Android's own (Google) backup carries it to a new phone. */
+    val androidBackupCopy: StateFlow<Boolean> = _androidBackupCopy.asStateFlow()
+
+    fun setAndroidBackupCopy(value: Boolean) {
+        prefs.edit().putBoolean(KEY_ANDROID_COPY, value).apply()
+        _androidBackupCopy.value = value
+    }
+
+    var lastAutoBackupAt: Long
+        get() = prefs.getLong(KEY_LAST_AUTO_BACKUP, 0L)
+        set(value) { prefs.edit().putLong(KEY_LAST_AUTO_BACKUP, value).apply() }
+
+    var lastAutoBackupTryAt: Long
+        get() = prefs.getLong(KEY_LAST_AUTO_BACKUP_TRY, 0L)
+        set(value) { prefs.edit().putLong(KEY_LAST_AUTO_BACKUP_TRY, value).apply() }
+
+    var lastAndroidCopyAt: Long
+        get() = prefs.getLong(KEY_LAST_ANDROID_COPY, 0L)
+        set(value) { prefs.edit().putLong(KEY_LAST_ANDROID_COPY, value).apply() }
+
+    var lastAndroidCopyTryAt: Long
+        get() = prefs.getLong(KEY_LAST_ANDROID_COPY_TRY, 0L)
+        set(value) { prefs.edit().putLong(KEY_LAST_ANDROID_COPY_TRY, value).apply() }
+
+    /** The "a restored backup copy was found" message is shown only once. */
+    var restoredCopyNoticed: Boolean
+        get() = prefs.getBoolean(KEY_RESTORED_NOTICED, false)
+        set(value) { prefs.edit().putBoolean(KEY_RESTORED_NOTICED, value).apply() }
 
     private val _swipeActions = MutableStateFlow(prefs.getBoolean(KEY_SWIPE_ACTIONS, true))
     /** Swipe left/right on a song row (queue end / play next). Off = the gesture does nothing at all. */
@@ -209,9 +343,19 @@ class AppSettings(context: Context) {
         set(value) { prefs.edit().putLong(KEY_LAST_UPDATE_CHECK, value).apply() }
 
     /** The newest version an automatic check found (empty = none), shown in About. */
+    private val _knownNewer = MutableStateFlow(prefs.getString(KEY_KNOWN_NEWER, "").orEmpty())
+    /** Observable form of [knownNewerVersion] (drives the red dot on the Settings button). */
+    val knownNewer: StateFlow<String> = _knownNewer.asStateFlow()
     var knownNewerVersion: String
-        get() = prefs.getString(KEY_KNOWN_NEWER, "").orEmpty()
-        set(value) { prefs.edit().putString(KEY_KNOWN_NEWER, value).apply() }
+        get() = _knownNewer.value
+        set(value) {
+            prefs.edit().putString(KEY_KNOWN_NEWER, value).apply()
+            _knownNewer.value = value
+        }
+
+    /** Grid (true) or list (false) of a library tab, remembered per device. [tab] is a short id like "songs". */
+    fun gridMode(tab: String, default: Boolean): Boolean = prefs.getBoolean(KEY_GRID_PREFIX + tab, default)
+    fun setGridMode(tab: String, grid: Boolean) { prefs.edit().putBoolean(KEY_GRID_PREFIX + tab, grid).apply() }
 
     // --- optional features: ALL default to OFF and do nothing until the user switches them on -------------------
 
@@ -280,9 +424,24 @@ class AppSettings(context: Context) {
         private const val KEY_EQ = "equalizerEnabled"
         private const val KEY_EQ_PRESET = "eqPreset"
         private const val KEY_EQ_CUSTOM = "eqCustom"
+        private const val KEY_RESTORE_QUEUE = "restoreQueue"
+        private const val KEY_FADE = "fadeBetweenSongs"
+        private const val KEY_FADE_SECONDS = "fadeSeconds"
+        private const val KEY_LYRICS_IN_PLAYER = "lyricsInPlayer"
+        private const val KEY_LYRICS_FILL = "lyricsFill"
         private const val KEY_AUTO_UPDATE = "autoUpdateCheck"
+        private const val KEY_BETA_UPDATES = "includeBetaUpdates"
+        private const val KEY_AUTO_BACKUP = "autoBackupEnabled"
+        private const val KEY_AUTO_BACKUP_FOLDER = "autoBackupFolder"
+        private const val KEY_ANDROID_COPY = "androidBackupCopy"
+        private const val KEY_LAST_AUTO_BACKUP = "lastAutoBackupAt"
+        private const val KEY_LAST_AUTO_BACKUP_TRY = "lastAutoBackupTryAt"
+        private const val KEY_LAST_ANDROID_COPY = "lastAndroidCopyAt"
+        private const val KEY_LAST_ANDROID_COPY_TRY = "lastAndroidCopyTryAt"
+        private const val KEY_RESTORED_NOTICED = "restoredCopyNoticed"
         private const val KEY_LAST_UPDATE_CHECK = "lastUpdateCheckAt"
         private const val KEY_KNOWN_NEWER = "knownNewerVersion"
+        private const val KEY_GRID_PREFIX = "gridMode_"
         private const val KEY_MIX_SETTINGS = "mixSettings"
         private const val KEY_MIX_SNAPSHOT = "mixSnapshot"
         private const val KEY_PURE_MODE = "pureMode"
@@ -304,6 +463,8 @@ class AppSettings(context: Context) {
         private const val KEY_THEME = "themeMode"
         private const val KEY_DYNAMIC = "dynamicColor"
         private const val KEY_ARTWORK_COLORS = "artworkColors"
+        private const val KEY_ARTWORK_BLUR = "artworkBlur"
+        private const val KEY_BLUR_EVERYWHERE = "blurEverywhere"
         private const val KEY_BACKGROUND = "backgroundVersion"
         private const val KEY_BACKGROUND_DIM = "backgroundDim"
     }

@@ -4,6 +4,7 @@ import android.os.Handler
 import android.os.Looper
 import android.os.SystemClock
 import androidx.media3.common.Player
+import androidx.media3.common.util.UnstableApi
 import androidx.media3.exoplayer.ExoPlayer
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -25,6 +26,7 @@ sealed interface SleepTimerState {
  * out, stops playback, stops the service and tells the UI (if it is open) to close the app.
  * All calls must be made on the main thread.
  */
+@androidx.annotation.OptIn(markerClass = [UnstableApi::class])
 object SleepTimer {
     private val handler = Handler(Looper.getMainLooper())
     private var player: ExoPlayer? = null
