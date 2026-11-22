@@ -1,0 +1,463 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>LocalPlayer</title>
+<meta name="description" content="LocalPlayer is a local-first, audio-only music player for Android. No account, no ads, no analytics.">
+<link rel="icon" href="favicon.png">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=DotGothic16&family=Roboto:ital,wght@0,400;0,500;0,700;0,900;1,700;1,900&display=swap" rel="stylesheet">
+<style>
+/* Direction: the app's own world. Deep wine background, a sunset glow rising from below, rounded dark panels, blue pill buttons.
+   Layout: sticky pill nav, split hero with two tilted phones, bento of screens, scrolling gallery, plain install steps. */
+:root{
+  --bg:#12060b;
+  --wine:#3b0c1b;
+  --ember:#e5603a;
+  --sun:#ffca6e;
+  --blue:#1e88e5;
+  --panel:#1b1c23;
+  --panel-2:#23242d;
+  --line:#3a3b48;
+  --ink:#f4ecf0;
+  --muted:#bdaeb6;
+  --display:"Roboto",system-ui,sans-serif;
+  --body:"Roboto",system-ui,sans-serif;
+  --dots:"DotGothic16","Courier New",monospace;
+  color-scheme:dark;
+}
+*{box-sizing:border-box}
+html{scroll-behavior:smooth}
+body{
+  margin:0;background:var(--bg);color:var(--ink);font-family:var(--body);font-size:17px;line-height:1.55;
+  background-image:
+    radial-gradient(1200px 700px at 85% -10%, rgba(229,96,58,.22), transparent 60%),
+    radial-gradient(900px 600px at 0% 20%, rgba(120,20,45,.55), transparent 60%),
+    linear-gradient(180deg,#3b0c1b 0,#1b0810 520px,#12060b 900px);
+  background-repeat:no-repeat;
+}
+img{max-width:100%;height:auto;display:block}
+a{color:inherit}
+h1,h2,h3{font-family:var(--display);margin:0;text-wrap:balance;line-height:1.05}
+h1{font-weight:900;font-style:italic;font-size:clamp(2.6rem,6.4vw,4.8rem);letter-spacing:-.02em}
+h2{font-weight:900;font-style:italic;font-size:clamp(1.9rem,4vw,2.9rem);letter-spacing:-.015em}
+h3{font-weight:700;font-size:1.25rem;line-height:1.2}
+p{margin:0}
+.wrap{width:min(1120px,100% - 40px);margin-inline:auto}
+:focus-visible{outline:3px solid var(--sun);outline-offset:3px;border-radius:12px}
+
+/* nav */
+.nav{position:sticky;top:12px;z-index:20;margin-top:12px}
+.nav-in{display:flex;align-items:center;gap:20px;padding:10px 12px 10px 18px;border-radius:999px;
+  background:rgba(27,28,35,.72);backdrop-filter:blur(14px);-webkit-backdrop-filter:blur(14px);border:1px solid rgba(255,255,255,.08)}
+.brand{display:flex;align-items:center;gap:10px;text-decoration:none;font-weight:700;font-size:1.05rem}
+.brand img{width:32px;height:32px;border-radius:9px}
+.nav ul{display:flex;gap:4px;list-style:none;margin:0 0 0 auto;padding:0}
+.nav ul a{display:block;padding:8px 14px;border-radius:999px;text-decoration:none;color:var(--muted);font-weight:500;font-size:.95rem}
+.nav ul a:hover{background:rgba(255,255,255,.07);color:var(--ink)}
+.lang{display:flex;border:1px solid var(--line);border-radius:999px;padding:3px}
+.lang button{font:inherit;font-size:.82rem;font-weight:700;border:0;background:none;color:var(--muted);padding:5px 11px;border-radius:999px;cursor:pointer}
+.lang button[aria-pressed="true"]{background:var(--ink);color:#1b0810}
+
+/* buttons */
+.btn{display:inline-flex;align-items:center;gap:10px;padding:14px 26px;border-radius:999px;font-weight:700;font-size:1rem;text-decoration:none;border:1px solid transparent;transition:transform .15s,background .15s}
+.btn-primary{background:var(--blue);color:#06142a}
+.btn-primary:hover{background:#4aa3f2;transform:translateY(-2px)}
+.btn-ghost{background:rgba(255,255,255,.06);border-color:rgba(255,255,255,.18);color:var(--ink)}
+.btn-ghost:hover{background:rgba(255,255,255,.12);transform:translateY(-2px)}
+.btn svg{width:20px;height:20px;flex:none}
+.nav .btn{padding:9px 18px;font-size:.92rem}
+
+/* hero */
+.hero{display:grid;grid-template-columns:1.05fr .95fr;gap:40px;align-items:center;padding:64px 0 40px}
+.eyebrow{font-family:var(--dots);color:var(--sun);font-size:1.02rem;letter-spacing:.04em;margin-bottom:18px}
+.hero p.lead{font-size:1.25rem;color:#e4d6dd;max-width:34ch;margin-top:22px}
+.cta{display:flex;flex-wrap:wrap;gap:12px;margin-top:32px}
+.chips{display:flex;flex-wrap:wrap;gap:8px;margin-top:28px;padding:0;list-style:none}
+.chips li{padding:6px 14px;border-radius:999px;background:rgba(255,255,255,.07);border:1px solid rgba(255,255,255,.1);font-size:.88rem;color:var(--muted)}
+.stage{position:relative;height:640px;display:flex;justify-content:center;align-items:center}
+.sun{position:absolute;width:420px;height:420px;border-radius:50%;top:70px;left:50%;transform:translateX(-50%);
+  background:linear-gradient(180deg,#ffd77f 0,#ffb865 55%,#f58a55 100%);
+  -webkit-mask:repeating-linear-gradient(180deg,#000 0 62%,transparent 62% 64%,#000 64% 71%,transparent 71% 74%,#000 74% 80%,transparent 80% 84%,#000 84% 88%,transparent 88% 93%,#000 93% 96%,transparent 96% 100%);
+  mask:linear-gradient(180deg,#000 0 60%,transparent 60% 62%,#000 62% 70%,transparent 70% 73%,#000 73% 80%,transparent 80% 84%,#000 84% 89%,transparent 89% 94%,#000 94% 97%,transparent 97%);
+  filter:blur(.4px);opacity:.95;box-shadow:0 0 160px 40px rgba(255,150,80,.25)}
+.stage .ph{position:absolute;filter:drop-shadow(0 28px 40px rgba(0,0,0,.55))}
+.stage .ph-a{width:270px;left:2%;top:50px;transform:rotate(-6deg)}
+.stage .ph-b{width:290px;right:0;top:0;transform:rotate(5deg)}
+
+/* principles */
+.principles{display:grid;grid-template-columns:repeat(3,1fr);gap:16px;margin:36px 0 0}
+.pr{background:rgba(27,28,35,.7);border:1px solid rgba(255,255,255,.07);border-radius:28px;padding:24px 28px;display:flex;align-items:baseline;gap:16px}
+.pr b{font-family:var(--dots);font-weight:400;font-size:3.4rem;line-height:1;color:var(--sun)}
+.pr span{color:var(--muted);font-size:1.02rem}
+.pr strong{display:block;color:var(--ink);font-size:1.15rem}
+
+/* sections */
+section{padding:84px 0 0}
+.sec-head{max-width:640px;margin-bottom:36px}
+.sec-head p{color:var(--muted);margin-top:14px;font-size:1.08rem}
+.kicker{font-family:var(--dots);color:var(--sun);font-size:.98rem;margin-bottom:12px;display:block}
+
+/* bento */
+.bento{display:grid;grid-template-columns:repeat(3,1fr);gap:18px}
+.tile{position:relative;overflow:hidden;background:var(--panel);border:1px solid rgba(255,255,255,.07);border-radius:34px;padding:28px 28px 0;min-height:480px;display:flex;flex-direction:column;transition:transform .2s,border-color .2s}
+.tile:hover{transform:translateY(-4px);border-color:rgba(255,255,255,.18)}
+.tile p{color:var(--muted);margin-top:10px;font-size:.98rem;max-width:34ch}
+.tile .shot{margin:26px auto 0;width:74%;max-width:250px}
+.tile .shot img{width:100%;border-radius:40px 40px 0 0;box-shadow:0 -10px 50px rgba(0,0,0,.35)}
+.tile.warm{background:linear-gradient(170deg,#5a1628 0,#2a1219 70%)}
+.tile.blue{background:linear-gradient(170deg,#1c2f55 0,#1b1c23 70%)}
+.tile.wide{grid-column:span 2;flex-direction:row;align-items:flex-start;gap:20px}
+.tile.wide .txt{flex:1;padding-bottom:28px}
+.tile.wide .shot{margin:26px 0 0;width:44%;max-width:250px;align-self:flex-end}
+
+/* feature list */
+.feats{display:grid;grid-template-columns:repeat(3,1fr);gap:18px;margin-top:18px}
+.feat{background:rgba(27,28,35,.7);border:1px solid rgba(255,255,255,.07);border-radius:28px;padding:26px 26px 28px}
+.feat i{display:block;width:34px;height:6px;border-radius:6px;background:linear-gradient(90deg,var(--ember),var(--sun));margin-bottom:18px}
+.feat p{color:var(--muted);margin-top:8px;font-size:.98rem}
+
+/* gallery */
+.gallery{display:flex;gap:22px;overflow-x:auto;padding:6px 4px 26px;scroll-snap-type:x mandatory;scrollbar-color:var(--line) transparent}
+.gallery figure{margin:0;flex:0 0 250px;scroll-snap-align:start}
+.gallery img{width:250px;filter:drop-shadow(0 18px 28px rgba(0,0,0,.45))}
+.gallery figcaption{margin-top:14px;text-align:center;color:var(--muted);font-size:.95rem}
+
+/* whats new */
+.news{display:grid;grid-template-columns:1.1fr .9fr;gap:22px;align-items:stretch}
+.news ul{list-style:none;margin:0;padding:0;display:grid;gap:12px}
+.news li{display:flex;gap:14px;align-items:flex-start;background:rgba(27,28,35,.7);border:1px solid rgba(255,255,255,.07);border-radius:22px;padding:16px 20px}
+.news li::before{content:"";flex:none;width:10px;height:10px;margin-top:9px;border-radius:50%;background:var(--ember)}
+.news li b{font-weight:700}
+.news li span{color:var(--muted)}
+.ver{border-radius:34px;padding:34px;background:linear-gradient(160deg,#e5603a 0,#8f2a3f 60%,#4a1224 100%);display:flex;flex-direction:column;justify-content:space-between;gap:28px}
+.ver .num{font-family:var(--dots);font-size:5.4rem;line-height:1}
+.ver p{color:#ffe9d9;max-width:30ch}
+.ver .btn{align-self:flex-start;background:#fff;color:#3a0c1b}
+.ver .btn:hover{background:#ffe9d9}
+
+/* install */
+.steps{counter-reset:s;list-style:none;margin:0;padding:0;display:grid;grid-template-columns:repeat(4,1fr);gap:16px}
+.steps li{counter-increment:s;background:var(--panel);border:1px solid rgba(255,255,255,.07);border-radius:28px;padding:24px}
+.steps li::before{content:counter(s);display:flex;align-items:center;justify-content:center;width:42px;height:42px;border-radius:50%;background:var(--blue);color:#06142a;font-weight:900;margin-bottom:16px}
+.steps li p{color:var(--muted);font-size:.97rem;margin-top:6px}
+.note{margin-top:18px;border-radius:22px;padding:16px 22px;background:rgba(255,202,110,.09);border:1px solid rgba(255,202,110,.3);color:#f3dcb4;font-size:.97rem}
+
+/* privacy */
+.privacy{display:grid;grid-template-columns:1fr 1fr;gap:22px}
+.card{background:var(--panel);border:1px solid rgba(255,255,255,.07);border-radius:34px;padding:34px}
+.card p{color:var(--muted);margin-top:12px}
+.net{list-style:none;margin:16px 0 0;padding:0;display:grid;gap:10px}
+.net li{display:flex;justify-content:space-between;gap:16px;padding:12px 18px;border-radius:18px;background:var(--panel-2);font-size:.97rem}
+.net li em{font-style:normal;color:var(--sun);font-family:var(--dots)}
+
+/* footer */
+footer{margin-top:96px;padding:36px 0 56px;border-top:1px solid rgba(255,255,255,.08)}
+.foot{display:flex;flex-wrap:wrap;gap:20px 36px;align-items:center;justify-content:space-between}
+.foot .links{display:flex;gap:22px;flex-wrap:wrap}
+.foot a{color:var(--muted);text-decoration:none}
+.foot a:hover{color:var(--ink);text-decoration:underline}
+.fine{margin-top:20px;color:#8f8089;font-size:.88rem;max-width:70ch}
+
+@media (max-width:960px){
+  .hero{grid-template-columns:1fr;padding-top:40px}
+  .stage{height:560px}
+  .bento,.feats{grid-template-columns:1fr 1fr}
+  .tile.wide{grid-column:span 2}
+  .steps{grid-template-columns:1fr 1fr}
+  .news,.privacy{grid-template-columns:1fr}
+  .principles{grid-template-columns:1fr}
+  .nav ul{display:none}
+  .nav .lang{margin-left:auto}
+}
+@media (max-width:620px){
+  body{font-size:16px}
+  .bento,.feats,.steps{grid-template-columns:1fr}
+  .tile.wide{grid-column:auto;flex-direction:column}
+  .tile.wide .shot{width:74%;margin:26px auto 0}
+  .stage{height:500px}
+  .stage .ph-a{width:210px}
+  .stage .ph-b{width:230px}
+  .sun{width:320px;height:320px}
+  .nav .btn{display:none}
+  .nav .lang{margin-left:auto}
+}
+@media (prefers-reduced-motion:reduce){*{transition:none!important;scroll-behavior:auto!important}}
+</style>
+</head>
+<body>
+
+<header class="nav">
+  <div class="wrap">
+    <div class="nav-in">
+      <a class="brand" href="#top"><img src="img/icon.png" alt="" width="32" height="32">LocalPlayer</a>
+      <ul>
+        <li><a href="#features" data-i="nav_features">Features</a></li>
+        <li><a href="#screens" data-i="nav_screens">Screenshots</a></li>
+        <li><a href="#new" data-i="nav_new">What's new</a></li>
+        <li><a href="#install" data-i="nav_install">Install</a></li>
+        <li><a href="#privacy" data-i="nav_privacy">Privacy</a></li>
+      </ul>
+      <div class="lang" role="group" aria-label="Language">
+        <button type="button" id="l-en" aria-pressed="true">EN</button>
+        <button type="button" id="l-el" aria-pressed="false">ΕΛ</button>
+      </div>
+      <a class="btn btn-primary" href="https://github.com/prodypro-mi2009/LocalPlayer/releases/latest" data-i="dl_short">Download</a>
+    </div>
+  </div>
+</header>
+
+<main id="top">
+<div class="wrap">
+
+  <div class="hero">
+    <div>
+      <div class="eyebrow" data-i="eyebrow">LOCAL-FIRST · ANDROID</div>
+      <h1 data-i="h1">Music that stays on your phone.</h1>
+      <p class="lead" data-i="lead">LocalPlayer plays the files you already own. No account, no ads, no analytics.</p>
+      <div class="cta">
+        <a class="btn btn-primary" href="https://github.com/prodypro-mi2009/LocalPlayer/releases/latest">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 4v11m0 0-5-5m5 5 5-5M5 20h14"/></svg>
+          <span data-i="dl">Download the latest APK</span>
+        </a>
+        <a class="btn btn-ghost" href="https://github.com/prodypro-mi2009/LocalPlayer">
+          <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 .5a11.5 11.5 0 0 0-3.64 22.41c.58.1.79-.25.79-.56v-2c-3.2.7-3.88-1.37-3.88-1.37-.52-1.33-1.28-1.69-1.28-1.69-1.04-.71.08-.7.08-.7 1.16.08 1.77 1.19 1.77 1.19 1.03 1.76 2.7 1.25 3.36.96.1-.75.4-1.25.73-1.54-2.55-.29-5.24-1.28-5.24-5.69 0-1.26.45-2.28 1.19-3.09-.12-.29-.52-1.46.11-3.05 0 0 .97-.31 3.17 1.18a11 11 0 0 1 5.77 0c2.2-1.49 3.17-1.18 3.17-1.18.63 1.59.23 2.76.11 3.05.74.81 1.19 1.83 1.19 3.09 0 4.42-2.69 5.39-5.25 5.68.41.36.78 1.06.78 2.14v3.17c0 .31.21.67.8.56A11.5 11.5 0 0 0 12 .5Z"/></svg>
+          <span>GitHub</span>
+        </a>
+      </div>
+      <ul class="chips">
+        <li>Version 2.0</li>
+        <li>Android ARM64</li>
+        <li>English · Ελληνικά</li>
+      </ul>
+    </div>
+    <div class="stage" aria-hidden="false">
+      <div class="sun" aria-hidden="true"></div>
+      <img class="ph ph-a" src="img/01-home.png" alt="LocalPlayer Home screen with favorite songs" width="560" height="1221">
+      <img class="ph ph-b" src="img/02-now-playing.png" alt="LocalPlayer Now Playing screen with a blurred cover background" width="560" height="1221">
+    </div>
+  </div>
+
+  <div class="principles">
+    <div class="pr"><b>0</b><span><strong data-i="p1t">accounts</strong><span data-i="p1d">Nothing to sign up for.</span></span></div>
+    <div class="pr"><b>0</b><span><strong data-i="p2t">ads</strong><span data-i="p2d">Just your music.</span></span></div>
+    <div class="pr"><b>0</b><span><strong data-i="p3t">analytics</strong><span data-i="p3d">Nobody counts your plays.</span></span></div>
+  </div>
+
+  <section id="features">
+    <div class="sec-head">
+      <span class="kicker" data-i="k_features">MADE FOR YOUR LIBRARY</span>
+      <h2 data-i="h_features">A player that looks like the song it plays.</h2>
+      <p data-i="s_features">The cover colors the whole app. Your files stay the source of truth: MP3, FLAC, M4A and AAC.</p>
+    </div>
+
+    <div class="bento">
+      <article class="tile warm">
+        <h3 data-i="t1">Buttons that follow your finger</h3>
+        <p data-i="d1">Shuffle and History slide closer as you scroll and a pill fades in around them. Scroll back and it reverses.</p>
+        <div class="shot"><img src="img/04-albums.png" alt="Albums grid with the Shuffle and History pill" loading="lazy" width="560" height="1221"></div>
+      </article>
+      <article class="tile">
+        <h3 data-i="t2">Blurred cover background</h3>
+        <p data-i="d2">Pick a blur strength from 1 to 5 and put it behind the whole app, not only Now Playing.</p>
+        <div class="shot"><img src="img/06-colors.png" alt="Colors settings with the blur strength slider" loading="lazy" width="560" height="1221"></div>
+      </article>
+      <article class="tile blue">
+        <h3 data-i="t3">Lyrics with a color fill</h3>
+        <p data-i="d3">Plain or LRC, with an editor. The sung line fills with color and you can shift every time at once.</p>
+        <div class="shot"><img src="img/03-lyrics.png" alt="Synced lyrics screen" loading="lazy" width="560" height="1221"></div>
+      </article>
+
+      <article class="tile wide">
+        <div class="txt">
+          <h3 data-i="t4">Genre pictures and stats</h3>
+          <p data-i="d4">Genres get their own artwork from the tag, in English or Greek. Statistics show listening time, songs played and a daily average for the last 7 days.</p>
+        </div>
+        <div class="shot"><img src="img/05-genres.png" alt="Genres tab with pictures" loading="lazy" width="560" height="1221"></div>
+        <div class="shot"><img src="img/07-stats.png" alt="Listening time statistics" loading="lazy" width="560" height="1221"></div>
+      </article>
+      <article class="tile warm">
+        <h3 data-i="t5">Now Playing, simplified</h3>
+        <p data-i="d5">Lyrics sit above the progress bar. Hide the file-info capsule and the title gets bigger.</p>
+        <div class="shot"><img src="img/02-now-playing.png" alt="Now Playing screen" loading="lazy" width="560" height="1221"></div>
+      </article>
+    </div>
+
+    <div class="feats">
+      <div class="feat"><i></i><h3 data-i="f1t">Tags and artwork</h3><p data-i="f1d">Edit one song or many at once, open a Details page, change or remove covers.</p></div>
+      <div class="feat"><i></i><h3 data-i="f2t">ReplayGain and equalizer</h3><p data-i="f2d">Find ReplayGain for a song, an album or the whole library (MP3 and FLAC). Sleep timer with “End of the queue”.</p></div>
+      <div class="feat"><i></i><h3 data-i="f3t">Playlist from Spotify</h3><p data-i="f3d">Paste a public playlist link, see what you already have, build a playlist, then look for the rest on YouTube. No Spotify login.</p></div>
+      <div class="feat"><i></i><h3 data-i="f4t">YouTube downloads</h3><p data-i="f4d">yt-dlp and FFmpeg inside the app, with your folder, genre and tag settings.</p></div>
+      <div class="feat"><i></i><h3 data-i="f5t">Backup and restore</h3><p data-i="f5d">Import by parts, optional weekly backup to a folder you choose, crash reports saved only on the phone.</p></div>
+      <div class="feat"><i></i><h3 data-i="f6t">And more</h3><p data-i="f6d">Widgets, duplicate finder, .m3u import and export, and re-linking a moved folder without losing favourites.</p></div>
+    </div>
+  </section>
+
+  <section id="screens">
+    <div class="sec-head">
+      <span class="kicker" data-i="k_screens">SCREENSHOTS</span>
+      <h2 data-i="h_screens">See it in motion.</h2>
+    </div>
+    <div class="gallery" tabindex="0" aria-label="Screenshots">
+      <figure><img src="img/01-home.png" alt="Home" loading="lazy" width="560" height="1221"><figcaption data-i="c1">Home</figcaption></figure>
+      <figure><img src="img/02-now-playing.png" alt="Now Playing" loading="lazy" width="560" height="1221"><figcaption data-i="c2">Now Playing</figcaption></figure>
+      <figure><img src="img/03-lyrics.png" alt="Lyrics" loading="lazy" width="560" height="1221"><figcaption data-i="c3">Lyrics</figcaption></figure>
+      <figure><img src="img/04-albums.png" alt="Albums" loading="lazy" width="560" height="1221"><figcaption data-i="c4">Albums</figcaption></figure>
+      <figure><img src="img/05-genres.png" alt="Genres" loading="lazy" width="560" height="1221"><figcaption data-i="c5">Genres</figcaption></figure>
+      <figure><img src="img/06-colors.png" alt="Colors" loading="lazy" width="560" height="1221"><figcaption data-i="c6">Colors</figcaption></figure>
+      <figure><img src="img/07-stats.png" alt="Statistics" loading="lazy" width="560" height="1221"><figcaption data-i="c7">Statistics</figcaption></figure>
+    </div>
+  </section>
+
+  <section id="new">
+    <div class="sec-head">
+      <span class="kicker" data-i="k_new">VERSION 2.0</span>
+      <h2 data-i="h_new">What's new.</h2>
+    </div>
+    <div class="news">
+      <ul>
+        <li><div><b data-i="n1t">Shuffle &amp; History pill.</b> <span data-i="n1d">Pill or Classic row, on the left or the right.</span></div></li>
+        <li><div><b data-i="n2t">Blurred cover by default.</b> <span data-i="n2d">With a strength slider and an option for the whole app.</span></div></li>
+        <li><div><b data-i="n3t">Playlist from Spotify.</b> <span data-i="n3d">Create or extend a playlist, then find the missing songs on YouTube.</span></div></li>
+        <li><div><b data-i="n4t">Better tools.</b> <span data-i="n4d">ReplayGain, duplicate finder and batch tag editing.</span></div></li>
+        <li><div><b data-i="n5t">Safer backups.</b> <span data-i="n5d">Import by parts and an optional weekly automatic backup.</span></div></li>
+        <li><div><b data-i="n6t">Faster start.</b> <span data-i="n6d">Covers load sooner and only the visible Home tab loads first.</span></div></li>
+      </ul>
+      <div class="ver">
+        <div class="num">2.0</div>
+        <p data-i="ver_d">The full list of changes is on the release page.</p>
+        <a class="btn" href="https://github.com/prodypro-mi2009/LocalPlayer/releases" data-i="ver_b">Read the release notes</a>
+      </div>
+    </div>
+  </section>
+
+  <section id="install">
+    <div class="sec-head">
+      <span class="kicker" data-i="k_install">INSTALL</span>
+      <h2 data-i="h_install">Four steps to your first song.</h2>
+    </div>
+    <ol class="steps">
+      <li><h3 data-i="i1t">Open the release</h3><p data-i="i1d">Go to the latest release page on GitHub.</p></li>
+      <li><h3 data-i="i2t">Download the APK</h3><p data-i="i2d">Save the .apk file to your phone.</p></li>
+      <li><h3 data-i="i3t">Install it</h3><p data-i="i3d">Open the file and allow “Install unknown apps” for your browser or file manager if asked.</p></li>
+      <li><h3 data-i="i4t">Choose your folders</h3><p data-i="i4d">Launch LocalPlayer and pick the folders with your music.</p></li>
+    </ol>
+    <div class="note" data-i="note">YouTube downloads work only on ARM64 (arm64-v8a) devices. Download only content you have the right to keep. The built-in update check runs once every 24 hours and can be turned off.</div>
+  </section>
+
+  <section id="privacy">
+    <div class="sec-head">
+      <span class="kicker" data-i="k_privacy">PRIVACY</span>
+      <h2 data-i="h_privacy">Everything works offline.</h2>
+    </div>
+    <div class="privacy">
+      <div class="card">
+        <h3 data-i="pv1t">Local-first by design</h3>
+        <p data-i="pv1d">There is no account, no ads and no analytics. Crash reports are optional, off by default and saved only on your phone. There is no Spotify login in the app.</p>
+      </div>
+      <div class="card">
+        <h3 data-i="pv2t">The only times it uses the network</h3>
+        <ul class="net">
+          <li><span data-i="nt1">Lyrics search</span><em>LRCLIB</em></li>
+          <li><span data-i="nt2">Update check</span><em>GitHub</em></li>
+          <li><span data-i="nt3">Downloads you start</span><em>YouTube</em></li>
+        </ul>
+      </div>
+    </div>
+  </section>
+
+</div>
+</main>
+
+<footer>
+  <div class="wrap">
+    <div class="foot">
+      <a class="brand" href="#top"><img src="img/icon.png" alt="" width="32" height="32">LocalPlayer</a>
+      <div class="links">
+        <a href="https://github.com/prodypro-mi2009/LocalPlayer">GitHub</a>
+        <a href="https://github.com/prodypro-mi2009/LocalPlayer/releases">Releases</a>
+        <a href="https://github.com/prodypro-mi2009/LocalPlayer/issues" data-i="issues">Report an issue</a>
+      </div>
+    </div>
+    <p class="fine" data-i="fine">Screenshots use invented demo tracks, artists, lyrics and cover art. Built with Kotlin, Jetpack Compose, Media3, yt-dlp and FFmpeg.</p>
+  </div>
+</footer>
+
+<script>
+var T={
+en:{nav_features:"Features",nav_screens:"Screenshots",nav_new:"What's new",nav_install:"Install",nav_privacy:"Privacy",dl_short:"Download",
+eyebrow:"LOCAL-FIRST · ANDROID",h1:"Music that stays on your phone.",lead:"LocalPlayer plays the files you already own. No account, no ads, no analytics.",dl:"Download the latest APK",
+p1t:"accounts",p1d:"Nothing to sign up for.",p2t:"ads",p2d:"Just your music.",p3t:"analytics",p3d:"Nobody counts your plays.",
+k_features:"MADE FOR YOUR LIBRARY",h_features:"A player that looks like the song it plays.",s_features:"The cover colors the whole app. Your files stay the source of truth: MP3, FLAC, M4A and AAC.",
+t1:"Buttons that follow your finger",d1:"Shuffle and History slide closer as you scroll and a pill fades in around them. Scroll back and it reverses.",
+t2:"Blurred cover background",d2:"Pick a blur strength from 1 to 5 and put it behind the whole app, not only Now Playing.",
+t3:"Lyrics with a color fill",d3:"Plain or LRC, with an editor. The sung line fills with color and you can shift every time at once.",
+t4:"Genre pictures and stats",d4:"Genres get their own artwork from the tag, in English or Greek. Statistics show listening time, songs played and a daily average for the last 7 days.",
+t5:"Now Playing, simplified",d5:"Lyrics sit above the progress bar. Hide the file-info capsule and the title gets bigger.",
+f1t:"Tags and artwork",f1d:"Edit one song or many at once, open a Details page, change or remove covers.",
+f2t:"ReplayGain and equalizer",f2d:"Find ReplayGain for a song, an album or the whole library (MP3 and FLAC). Sleep timer with “End of the queue”.",
+f3t:"Playlist from Spotify",f3d:"Paste a public playlist link, see what you already have, build a playlist, then look for the rest on YouTube. No Spotify login.",
+f4t:"YouTube downloads",f4d:"yt-dlp and FFmpeg inside the app, with your folder, genre and tag settings.",
+f5t:"Backup and restore",f5d:"Import by parts, optional weekly backup to a folder you choose, crash reports saved only on the phone.",
+f6t:"And more",f6d:"Widgets, duplicate finder, .m3u import and export, and re-linking a moved folder without losing favourites.",
+k_screens:"SCREENSHOTS",h_screens:"See it in motion.",c1:"Home",c2:"Now Playing",c3:"Lyrics",c4:"Albums",c5:"Genres",c6:"Colors",c7:"Statistics",
+k_new:"VERSION 2.0",h_new:"What's new.",
+n1t:"Shuffle & History pill.",n1d:"Pill or Classic row, on the left or the right.",n2t:"Blurred cover by default.",n2d:"With a strength slider and an option for the whole app.",
+n3t:"Playlist from Spotify.",n3d:"Create or extend a playlist, then find the missing songs on YouTube.",n4t:"Better tools.",n4d:"ReplayGain, duplicate finder and batch tag editing.",
+n5t:"Safer backups.",n5d:"Import by parts and an optional weekly automatic backup.",n6t:"Faster start.",n6d:"Covers load sooner and only the visible Home tab loads first.",
+ver_d:"The full list of changes is on the release page.",ver_b:"Read the release notes",
+k_install:"INSTALL",h_install:"Four steps to your first song.",
+i1t:"Open the release",i1d:"Go to the latest release page on GitHub.",i2t:"Download the APK",i2d:"Save the .apk file to your phone.",
+i3t:"Install it",i3d:"Open the file and allow “Install unknown apps” for your browser or file manager if asked.",i4t:"Choose your folders",i4d:"Launch LocalPlayer and pick the folders with your music.",
+note:"YouTube downloads work only on ARM64 (arm64-v8a) devices. Download only content you have the right to keep. The built-in update check runs once every 24 hours and can be turned off.",
+k_privacy:"PRIVACY",h_privacy:"Everything works offline.",pv1t:"Local-first by design",
+pv1d:"There is no account, no ads and no analytics. Crash reports are optional, off by default and saved only on your phone. There is no Spotify login in the app.",
+pv2t:"The only times it uses the network",nt1:"Lyrics search",nt2:"Update check",nt3:"Downloads you start",issues:"Report an issue",
+fine:"Screenshots use invented demo tracks, artists, lyrics and cover art. Built with Kotlin, Jetpack Compose, Media3, yt-dlp and FFmpeg."},
+el:{nav_features:"Δυνατότητες",nav_screens:"Εικόνες",nav_new:"Τι νέο υπάρχει",nav_install:"Εγκατάσταση",nav_privacy:"Απόρρητο",dl_short:"Λήψη",
+eyebrow:"LOCAL-FIRST · ANDROID",h1:"Μουσική που μένει στο κινητό σου.",lead:"Το LocalPlayer παίζει τα αρχεία που ήδη έχεις. Χωρίς λογαριασμό, διαφημίσεις ή analytics.",dl:"Λήψη της τελευταίας έκδοσης APK",
+p1t:"λογαριασμοί",p1d:"Δεν χρειάζεται εγγραφή.",p2t:"διαφημίσεις",p2d:"Μόνο η μουσική σου.",p3t:"analytics",p3d:"Κανείς δεν μετράει τις ακροάσεις σου.",
+k_features:"ΦΤΙΑΓΜΕΝΟ ΓΙΑ ΤΗ ΒΙΒΛΙΟΘΗΚΗ ΣΟΥ",h_features:"Ένας player που μοιάζει με το τραγούδι που παίζει.",s_features:"Το εξώφυλλο χρωματίζει όλη την εφαρμογή. Τα αρχεία σου μένουν η πηγή αλήθειας: MP3, FLAC, M4A και AAC.",
+t1:"Κουμπιά που ακολουθούν το δάχτυλο",d1:"Το Shuffle και το Ιστορικό πλησιάζουν καθώς κυλάς και γύρω τους εμφανίζεται ένα «χάπι». Κύλα πίσω και γίνεται το αντίστροφο.",
+t2:"Θολό φόντο από το εξώφυλλο",d2:"Διάλεξε ένταση θολώματος από 1 έως 5 και βάλε το πίσω από όλη την εφαρμογή, όχι μόνο στο Now Playing.",
+t3:"Στίχοι με γέμισμα χρώματος",d3:"Απλοί ή LRC, με επεξεργαστή. Η γραμμή που τραγουδιέται γεμίζει με χρώμα και μπορείς να μετακινήσεις όλους τους χρόνους μαζί.",
+t4:"Εικόνες ειδών και στατιστικά",d4:"Τα είδη παίρνουν δική τους εικόνα από το tag, σε αγγλικά ή ελληνικά. Τα στατιστικά δείχνουν χρόνο ακρόασης, τραγούδια που παίχτηκαν και μέσο όρο ημέρας για τις τελευταίες 7 ημέρες.",
+t5:"Σε αναπαραγωγή, πιο απλά",d5:"Οι στίχοι μπαίνουν πάνω από τη γραμμή προόδου. Κρύψε την κάψουλα πληροφοριών αρχείου και ο τίτλος μεγαλώνει.",
+f1t:"Tags και εξώφυλλα",f1d:"Επεξεργασία ενός ή πολλών τραγουδιών μαζί, σελίδα Λεπτομερειών, αλλαγή ή αφαίρεση εξώφυλλου.",
+f2t:"ReplayGain και equalizer",f2d:"Εύρεση ReplayGain για τραγούδι, άλμπουμ ή όλη τη βιβλιοθήκη (MP3 και FLAC). Χρονόμετρο ύπνου με «Τέλος της ουράς».",
+f3t:"Playlist από Spotify",f3d:"Επικόλλησε τον σύνδεσμο δημόσιας playlist, δες τι έχεις ήδη, φτιάξε playlist και ψάξε τα υπόλοιπα στο YouTube. Χωρίς σύνδεση στο Spotify.",
+f4t:"Λήψεις από YouTube",f4d:"yt-dlp και FFmpeg μέσα στην εφαρμογή, με τις δικές σου ρυθμίσεις φακέλου, είδους και tags.",
+f5t:"Αντίγραφα ασφαλείας",f5d:"Εισαγωγή ανά μέρη, προαιρετικό εβδομαδιαίο αντίγραφο σε φάκελο της επιλογής σου, αναφορές σφαλμάτων μόνο στο κινητό.",
+f6t:"Και άλλα",f6d:"Widgets, εύρεση διπλότυπων, εισαγωγή και εξαγωγή .m3u και επανασύνδεση φακέλου που μετακινήθηκε χωρίς απώλεια αγαπημένων.",
+k_screens:"ΕΙΚΟΝΕΣ",h_screens:"Δες την εφαρμογή.",c1:"Αρχική",c2:"Σε αναπαραγωγή",c3:"Στίχοι",c4:"Άλμπουμ",c5:"Είδη",c6:"Χρώματα",c7:"Στατιστικά",
+k_new:"ΕΚΔΟΣΗ 2.0",h_new:"Τι νέο υπάρχει.",
+n1t:"Χάπι Shuffle & Ιστορικό.",n1d:"Χάπι ή Κλασική γραμμή, αριστερά ή δεξιά.",n2t:"Θολό εξώφυλλο από προεπιλογή.",n2d:"Με slider έντασης και επιλογή για όλη την εφαρμογή.",
+n3t:"Playlist από Spotify.",n3d:"Δημιούργησε ή συμπλήρωσε playlist και βρες τα τραγούδια που λείπουν στο YouTube.",n4t:"Καλύτερα εργαλεία.",n4d:"ReplayGain, εύρεση διπλότυπων και ομαδική επεξεργασία tags.",
+n5t:"Ασφαλέστερα αντίγραφα.",n5d:"Εισαγωγή ανά μέρη και προαιρετικό αυτόματο εβδομαδιαίο αντίγραφο.",n6t:"Πιο γρήγορη εκκίνηση.",n6d:"Τα εξώφυλλα φορτώνουν νωρίτερα και φορτώνει πρώτα μόνο η ορατή καρτέλα της Αρχικής.",
+ver_d:"Ολόκληρη η λίστα αλλαγών βρίσκεται στη σελίδα της έκδοσης.",ver_b:"Διάβασε τα release notes",
+k_install:"ΕΓΚΑΤΑΣΤΑΣΗ",h_install:"Τέσσερα βήματα μέχρι το πρώτο τραγούδι.",
+i1t:"Άνοιξε την έκδοση",i1d:"Πήγαινε στη σελίδα της τελευταίας έκδοσης στο GitHub.",i2t:"Κατέβασε το APK",i2d:"Αποθήκευσε το αρχείο .apk στο κινητό σου.",
+i3t:"Εγκατάστησέ το",i3d:"Άνοιξε το αρχείο και επέτρεψε το «Εγκατάσταση άγνωστων εφαρμογών» για τον browser ή τον διαχειριστή αρχείων, αν ζητηθεί.",i4t:"Διάλεξε φακέλους",i4d:"Άνοιξε το LocalPlayer και διάλεξε τους φακέλους με τη μουσική σου.",
+note:"Οι λήψεις από YouTube δουλεύουν μόνο σε συσκευές ARM64 (arm64-v8a). Κατεβάζεις μόνο περιεχόμενο που έχεις δικαίωμα να κρατήσεις. Ο ενσωματωμένος έλεγχος ενημερώσεων τρέχει μία φορά κάθε 24 ώρες και μπορεί να κλείσει.",
+k_privacy:"ΑΠΟΡΡΗΤΟ",h_privacy:"Όλα δουλεύουν χωρίς internet.",pv1t:"Local-first εκ κατασκευής",
+pv1d:"Δεν υπάρχει λογαριασμός, διαφημίσεις ή analytics. Οι αναφορές σφαλμάτων είναι προαιρετικές, κλειστές από προεπιλογή και αποθηκεύονται μόνο στο κινητό σου. Δεν υπάρχει σύνδεση στο Spotify μέσα στην εφαρμογή.",
+pv2t:"Οι μόνες φορές που χρησιμοποιεί το δίκτυο",nt1:"Αναζήτηση στίχων",nt2:"Έλεγχος ενημερώσεων",nt3:"Λήψεις που ξεκινάς εσύ",issues:"Αναφορά προβλήματος",
+fine:"Τα screenshots χρησιμοποιούν επινοημένα τραγούδια, καλλιτέχνες, στίχους και εξώφυλλα. Φτιαγμένο με Kotlin, Jetpack Compose, Media3, yt-dlp και FFmpeg."}
+};
+function setLang(l){
+  var d=T[l];
+  document.documentElement.lang=l==="el"?"el":"en";
+  document.querySelectorAll("[data-i]").forEach(function(e){var k=e.getAttribute("data-i"); if(d[k]!==undefined) e.textContent=d[k];});
+  document.getElementById("l-en").setAttribute("aria-pressed",l==="en");
+  document.getElementById("l-el").setAttribute("aria-pressed",l==="el");
+  try{localStorage.setItem("lp-lang",l);}catch(e){}
+}
+document.getElementById("l-en").addEventListener("click",function(){setLang("en");});
+document.getElementById("l-el").addEventListener("click",function(){setLang("el");});
+var saved=null; try{saved=localStorage.getItem("lp-lang");}catch(e){}
+if(saved==="el"){setLang("el");}
+</script>
+</body>
+</html>
