@@ -13,13 +13,11 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material3.Button
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
-import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -28,21 +26,16 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
-import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.stringResource
-import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.localplayer.music.R
 import com.localplayer.music.data.db.TrackListItem
-import com.localplayer.music.data.library.AlbumItem
 import com.localplayer.music.ui.LibraryViewModel
 import com.localplayer.music.ui.components.AppIcons
-import com.localplayer.music.ui.components.BottomBackButton
 import com.localplayer.music.ui.components.DetailHero
 import com.localplayer.music.ui.components.songCountText
-import com.localplayer.music.ui.components.ArtworkImage
 import com.localplayer.music.ui.components.ConfirmDialog
 import com.localplayer.music.ui.components.DetailTopBar
 import com.localplayer.music.ui.components.barPadding
@@ -131,7 +124,6 @@ internal fun TrackListDetail(
             }
         }
     }
-    BottomBackButton(onBack = { nav.pop() }, modifier = Modifier.align(Alignment.BottomStart).padding(start = 12.dp, bottom = 8.dp))
     }
 }
 
@@ -186,7 +178,31 @@ fun AlbumScreen(screen: Screen.Album, nav: NavState, viewModel: LibraryViewModel
 
     Box(Modifier.fillMaxSize()) {
     Column(Modifier.fillMaxSize()) {
-        DetailTopBar(title = title, onBack = { nav.pop() }, onSettings = { nav.push(Screen.Settings) })
+        var albumMenu by androidx.compose.runtime.remember { androidx.compose.runtime.mutableStateOf(false) }
+        DetailTopBar(
+            title = title,
+            onBack = { nav.pop() },
+            onSettings = { nav.push(Screen.Settings) },
+            actions = {
+                if (list.isNotEmpty()) {
+                    Box {
+                        androidx.compose.material3.IconButton(onClick = { albumMenu = true }) {
+                            androidx.compose.material3.Icon(com.localplayer.music.ui.components.AppIcons.MoreVert, contentDescription = stringResource(R.string.more_options))
+                        }
+                        com.localplayer.music.ui.components.AppDropdownMenu(expanded = albumMenu, onDismiss = { albumMenu = false }) {
+                            com.localplayer.music.ui.components.AppMenuItem(
+                                com.localplayer.music.ui.components.AppIcons.Edit,
+                                stringResource(R.string.bulk_edit_title),
+                            ) { albumMenu = false; nav.push(Screen.BulkEditAlbum(screen.groupKey, screen.title)) }
+                            com.localplayer.music.ui.components.AppMenuItem(
+                                com.localplayer.music.ui.components.AppIcons.VolumeUp,
+                                stringResource(R.string.gain_album_title),
+                            ) { albumMenu = false; nav.push(Screen.GainAlbum(screen.groupKey, screen.title)) }
+                        }
+                    }
+                }
+            },
+        )
         if (tracks != null && list.isEmpty()) {
             EmptyState(stringResource(R.string.empty_library))
             return@Column
@@ -223,7 +239,6 @@ fun AlbumScreen(screen: Screen.Album, nav: NavState, viewModel: LibraryViewModel
             }
         }
     }
-    BottomBackButton(onBack = { nav.pop() }, modifier = Modifier.align(Alignment.BottomStart).padding(start = 12.dp, bottom = 8.dp))
     }
 }
 

@@ -5,44 +5,54 @@
          permission; Android 12 and older use the single storage-read permission. -->
     <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE" android:maxSdkVersion="32" />
     <uses-permission android:name="android.permission.READ_MEDIA_AUDIO" />
-    <uses-permission android:name="android.permission.READ_MEDIA_VIDEO" tools:node="remove" />
 
     <!-- Android 8-9 only: the legacy permission needed to modify an audio file's tags. Android 10+ uses the
          per-file system consent dialog instead (MediaStore.createWriteRequest), so no broad permission. -->
     <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE" android:maxSdkVersion="28" />
 
     <!-- Needed only for the playback foreground service and its media notification. -->
-    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <!-- tools:ignore: the Play Console foreground-service declaration only matters for a Play Store release; the
+         types (mediaPlayback, dataSync) are declared on the services below. -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" tools:ignore="ForegroundServicesPolicy" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
     <!-- Keeps the CPU awake while a local file is playing with the screen off. -->
     <uses-permission android:name="android.permission.WAKE_LOCK" />
 
-    <!-- Never request photo access or anything beyond audio/video reading. These lines also strip
-         them if a library ever tries to add them. -->
-    <uses-permission android:name="android.permission.READ_MEDIA_IMAGES" tools:node="remove" />
-    <uses-permission android:name="android.permission.READ_MEDIA_VISUAL_USER_SELECTED" tools:node="remove" />
-    <uses-permission android:name="android.permission.ACCESS_MEDIA_LOCATION" tools:node="remove" />
 
     <!-- Internet is used ONLY for things the user starts or allows: LRCLIB lyrics search (button press), the
-         update check / APK download from the project's GitHub Releases, and the YouTube downloads the user starts. The library, statistics and everything else
-         stay local; there is no analytics, ads or tracking. Network state is never read. -->
+         update check / APK download from the project's GitHub Releases, and the YouTube downloads the user starts
+         (the yt-dlp engine, its Python/FFmpeg libraries and its updates, which are downloaded from GitHub and run
+         on the device, are part of that). The library, statistics and everything else stay local; there is no
+         analytics, ads or tracking. Network state is never read. -->
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" tools:node="remove" />
     <!-- "Download from YouTube" (Settings): keeps a started download running while the app is in the background. -->
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
 
+    <!-- Jam (Settings > Jam, off by default): a small server on THIS phone for the phones of the same Wi-Fi / hotspot. Newer
+         Android versions may ask for access to the local network; the permission is declared so that they can. -->
+    <!-- JAM DISABLED (see jam/JamSwitch.kt):
+    <uses-permission android:name="android.permission.ACCESS_LOCAL_NETWORK" />
+    -->
+
     <!-- Lets the user open the downloaded release APK in Android's own installer (which asks for confirmation). -->
-    <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
+    <!-- tools:ignore: Play policy only; the app is distributed through GitHub Releases and the install is always started
+         by the user and confirmed in Android's own installer. -->
+    <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" tools:ignore="RequestInstallPackagesPolicy" />
 
     <application
         android:name=".LocalPlayerApp"
         android:enableOnBackInvokedCallback="true"
-        android:allowBackup="false"
+        tools:ignore="UnusedAttribute"
+        android:allowBackup="true"
+        android:fullBackupContent="@xml/backup_rules"
+        android:dataExtractionRules="@xml/data_extraction_rules"
         android:icon="@mipmap/ic_launcher"
         android:roundIcon="@mipmap/ic_launcher_round"
         android:label="@string/app_name"
         android:supportsRtl="true"
+        android:usesCleartextTraffic="false"
         android:theme="@style/Theme.LocalPlayer">
 
         <activity
@@ -69,6 +79,7 @@
         <service
             android:name=".playback.PlaybackService"
             android:exported="true"
+            tools:ignore="ExportedService"
             android:foregroundServiceType="mediaPlayback"
             android:stopWithTask="false">
             <intent-filter>
@@ -81,6 +92,21 @@
             android:name=".data.download.DownloadService"
             android:exported="false"
             android:foregroundServiceType="dataSync" />
+
+        <!-- The Yes / No buttons of the "X asks for the next song" notification of a Jam. -->
+        <!-- JAM DISABLED (see jam/JamSwitch.kt):
+        <receiver
+            android:name=".jam.JamVoteReceiver"
+            android:exported="false" />
+        -->
+
+        <!-- Keeps the Jam server of a hosted session alive (Settings > Jam). -->
+        <!-- JAM DISABLED (see jam/JamSwitch.kt):
+        <service
+            android:name=".jam.JamService"
+            android:exported="false"
+            android:foregroundServiceType="dataSync" />
+        -->
 
         <!-- Home-screen widgets: inactive (no controls, no updates) until the user enables them in Settings > Widgets. -->
         <receiver android:name=".widget.CompactWidgetProvider" android:exported="false">

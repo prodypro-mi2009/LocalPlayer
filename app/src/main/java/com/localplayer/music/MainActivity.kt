@@ -89,7 +89,8 @@ class MainActivity : ComponentActivity() {
 
     override fun onStop() {
         // Playback continues in PlaybackService; we only drop the UI's controller.
-        container.playerConnection.release()
+        // While this phone hosts a Jam the controller stays connected: the guests' songs are queued through it.
+        if (!com.localplayer.music.jam.JamSwitch.ENABLED || !container.jam.isHosting) container.playerConnection.release()
         super.onStop()
     }
 }

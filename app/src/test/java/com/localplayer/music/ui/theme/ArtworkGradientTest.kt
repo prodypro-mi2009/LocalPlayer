@@ -56,4 +56,16 @@ class ArtworkGradientTest {
         }
         assertTrue(stops.all { it.second >= 0.30f - 1e-6f })
     }
+
+    @Test fun nowPlayingTintNeverReachesZeroAndNeverRises() {
+        var previous = Float.MAX_VALUE
+        for (i in 0..100) {
+            val a = ArtworkGradient.nowPlayingAlpha(i / 100f)
+            assertTrue(a >= 0.49f)
+            assertTrue(a <= previous + 1e-6f)
+            previous = a
+        }
+        assertEquals(0.85f, ArtworkGradient.nowPlayingAlpha(0f), 1e-6f)
+        assertEquals(0.50f, ArtworkGradient.nowPlayingAlpha(1f), 1e-6f)
+    }
 }

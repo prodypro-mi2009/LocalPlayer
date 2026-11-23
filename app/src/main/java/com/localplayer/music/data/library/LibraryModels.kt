@@ -84,6 +84,16 @@ sealed interface AddFolderResult {
     data object NoPermission : AddFolderResult
 }
 
+/** Result of pointing a folder that was renamed or moved at its new place. */
+sealed interface RelinkResult {
+    data class Done(val label: String, val moved: Int) : RelinkResult
+    data object AlreadyAdded : RelinkResult
+    data object Unsupported : RelinkResult
+    data object NoPermission : RelinkResult
+    /** The new folder could not be read completely, so nothing was changed. */
+    data object Unreadable : RelinkResult
+}
+
 /** What the "playlist from folder" dialog shows before anything is created. */
 data class FolderAnalysis(
     val treeUri: String,

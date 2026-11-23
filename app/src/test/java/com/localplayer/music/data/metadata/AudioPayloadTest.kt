@@ -32,7 +32,7 @@ class AudioPayloadTest {
         for ((name, container) in cases) {
             val file = copyOf(name)
             val before = AudioPayload.sha256(file, container)
-            FileTagEngine.write(
+            TestTagWrite.write(
                 file,
                 container,
                 mapOf(

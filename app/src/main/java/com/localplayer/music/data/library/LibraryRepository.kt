@@ -1,5 +1,6 @@
 package com.localplayer.music.data.library
 
+import androidx.core.net.toUri
 import android.net.Uri
 import androidx.room.withTransaction
 import androidx.sqlite.db.SimpleSQLiteQuery
@@ -21,6 +22,10 @@ import com.localplayer.music.data.db.TRACK_COLS_T
 import com.localplayer.music.data.db.TrackListItem
 import com.localplayer.music.data.db.VISIBLE
 import com.localplayer.music.data.db.VISIBLE_T
+import com.localplayer.music.data.playlist.M3u
+import com.localplayer.music.data.playlist.M3uCandidate
+import com.localplayer.music.data.playlist.M3uEntry
+import com.localplayer.music.data.playlist.M3uMatcher
 import com.localplayer.music.playback.ArtworkRef
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
@@ -122,7 +127,7 @@ class LibraryRepository(
                         key = f.folderKey,
                         label = f.label,
                         trackCount = rows.filter { FolderKeys.covers(f.folderKey, it.folderKey) }.sumOf { it.trackCount },
-                        accessible = folderAccess.hasPermission(Uri.parse(f.treeUri)),
+                        accessible = folderAccess.hasPermission(f.treeUri.toUri()),
                     )
                 },
             )
@@ -146,9 +151,74 @@ class LibraryRepository(
         return AddFolderResult.Added(label)
     }
 
+    /**
+     * A picked folder was renamed or moved: the user points at its new place. Every song whose file is found there at
+     * the same relative path keeps its database row and all its data (favourites, playlists, history, statistics,
+     * hidden state, artist overrides); only its address changes. Songs that are not there any more are removed from
+     * the index like in [removeLibraryFolder]. Nothing is changed when the new folder cannot be read completely.
+     */
+    suspend fun relinkLibraryFolder(oldTree: String, newTree: Uri): RelinkResult {
+        val newText = newTree.toString()
+        if (folderAccess.folderKeyOf(newTree) == null) return RelinkResult.Unsupported
+        if (newText == oldTree || folderDao.libraryFolders().any { it.treeUri == newText }) return RelinkResult.AlreadyAdded
+        val oldRoot = try {
+            android.provider.DocumentsContract.getTreeDocumentId(oldTree.toUri())
+        } catch (e: Exception) {
+            return RelinkResult.Unsupported
+        }
+        val newRoot = android.provider.DocumentsContract.getTreeDocumentId(newTree)
+        if (!folderAccess.persist(newTree)) return RelinkResult.NoPermission
+        val walk = withContext(Dispatchers.IO) { folderAccess.walk(newTree) }
+        if (walk == null || !walk.complete) return RelinkResult.Unreadable
+        val found = walk.files.mapTo(HashSet()) { it.uri.toString() }
+
+        class Move(val id: Long, val oldUri: String, val newUri: String, val folderKey: String?)
+        val rows = folderDao.idsAndUrisByPrefix(FolderAccess.rowPrefix(oldTree))
+        val moves = ArrayList<Move>()
+        for (row in rows) {
+            val doc = try {
+                android.provider.DocumentsContract.getDocumentId(row.uri.toUri())
+            } catch (e: Exception) {
+                continue
+            }
+            val rel = when {
+                oldRoot.endsWith(":") -> if (doc.startsWith(oldRoot)) doc.substring(oldRoot.length) else continue
+                doc.startsWith("$oldRoot/") -> doc.substring(oldRoot.length + 1)
+                else -> continue
+            }
+            val newDoc = if (newRoot.endsWith(":") || newRoot.endsWith("/")) newRoot + rel else "$newRoot/$rel"
+            val newUri = android.provider.DocumentsContract.buildDocumentUriUsingTree(newTree, newDoc).toString()
+            if (newUri !in found) continue
+            moves.add(Move(row.id, row.uri, newUri, FolderKeys.fromFolderDocumentId(newDoc.substringBeforeLast('/', newDoc))))
+        }
+        val movedIds = moves.mapTo(HashSet()) { it.id }
+        val gone = rows.map { it.id }.filter { it !in movedIds }
+        val label = folderAccess.displayName(newTree)
+        database.withTransaction {
+            for (m in moves) {
+                folderDao.moveTrackRow(m.id, m.newUri, m.folderKey)
+                folderDao.moveInPlaylists(m.oldUri, m.newUri)
+                folderDao.moveInHistory(m.oldUri, m.newUri)
+                folderDao.moveInFavorites(m.oldUri, m.newUri)
+                folderDao.moveInOverrides(m.oldUri, m.newUri)
+                folderDao.moveInHidden(m.oldUri, m.newUri)
+                folderDao.moveInListening(m.oldUri, m.newUri)
+            }
+            for (chunk in gone.chunked(500)) tracks.deleteByIds(chunk)
+            folderDao.deleteLibraryFolder(oldTree)
+            folderDao.upsertLibraryFolder(
+                LibraryFolderEntity(newText, folderAccess.folderKeyOf(newTree).orEmpty(), label, System.currentTimeMillis()),
+            )
+        }
+        searchIndex.delete(gone)
+        folderAccess.release(oldTree.toUri())
+        rescan()
+        return RelinkResult.Done(label, moves.size)
+    }
+
     /** Gives the permission back and removes the songs that came only from this folder from the library index. */
     suspend fun removeLibraryFolder(treeUri: String) {
-        folderAccess.release(Uri.parse(treeUri))
+        folderAccess.release(treeUri.toUri())
         val ids = tracks.idsByUriPrefix(FolderAccess.rowPrefix(treeUri))
         database.withTransaction {
             for (chunk in ids.chunked(500)) tracks.deleteByIds(chunk)
@@ -415,6 +485,49 @@ class LibraryRepository(
         )
     }
 
+    // --- duplicates (read only when the user opens the screen) ---------------------------------
+
+    suspend fun duplicateGroups(): List<DupGroup> =
+        withContext(Dispatchers.Default) { DuplicateFinder.find(tracks.visibleBriefs()) }
+
+    /** Hides every copy except the one to keep, in each group. Nothing is deleted; "Hidden songs" brings them back. */
+    suspend fun hideDuplicateCopies(groups: List<DupGroup>): List<String> {
+        val hidden = ArrayList<String>()
+        database.withTransaction {
+            val now = System.currentTimeMillis()
+            for (g in groups) for (t in g.tracks) {
+                if (t.id == g.keep.id) continue
+                hiddenDao.hide(HiddenTrackEntity(t.uri, now, t.name, t.sizeBytes))
+                hidden += t.uri
+            }
+        }
+        return hidden
+    }
+
+    // --- playlists as .m3u ------------------------------------------------------------------------
+
+    /** The playlist as .m3u text (file names + #EXTINF), or null for an empty playlist. */
+    suspend fun playlistAsM3u(id: Long): String? {
+        val rows = playlists.exportBriefs(id)
+        if (rows.isEmpty()) return null
+        return M3u.write(rows.map { M3uEntry(it.name ?: it.title, it.title, it.artist, (it.durationMs / 1000).toInt()) })
+    }
+
+    class M3uImport(val playlistId: Long, val added: Int, val missing: Int)
+
+    /** Creates a playlist from .m3u text. Lines that match no song of this library are counted, never guessed. */
+    suspend fun importM3u(name: String, text: String): M3uImport? {
+        val entries = M3u.parse(text)
+        if (entries.isEmpty()) return null
+        val matcher = withContext(Dispatchers.Default) {
+            M3uMatcher(tracks.visibleBriefs().map { M3uCandidate(it.uri, it.name, it.title, it.artist, it.durationMs) })
+        }
+        val uris = entries.mapNotNull { matcher.match(it) }
+        val id = createPlaylist(name)
+        val result = addToPlaylist(id, uris)
+        return M3uImport(id, result.added, entries.size - uris.size)
+    }
+
     // --- playlists (app data) -----------------------------------------------------------------
 
     fun playlists(): Flow<List<PlaylistItem>> =
@@ -459,6 +572,15 @@ class LibraryRepository(
         val old = playlists.getPlaylist(id)?.coverFile ?: return
         playlists.setCover(id, null, System.currentTimeMillis())
         playlistCovers.delete(old)
+    }
+
+    /** Ids of the playlists that already hold ALL of [trackUris] (nothing could be added to them). */
+    suspend fun playlistsHoldingAll(trackUris: List<String>): Set<Long> {
+        val wanted = trackUris.distinct()
+        if (wanted.isEmpty()) return emptySet()
+        val counts = HashMap<Long, Int>()
+        for (chunk in wanted.chunked(900)) for (row in playlists.countContained(chunk)) counts.merge(row.playlistId, row.n, Int::plus)
+        return counts.filterValues { it >= wanted.size }.keys
     }
 
     /** One track appears at most once per playlist; repeated adds are counted, not duplicated. */

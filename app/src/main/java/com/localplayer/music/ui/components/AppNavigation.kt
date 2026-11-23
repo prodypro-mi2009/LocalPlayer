@@ -21,6 +21,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.widthIn
@@ -32,6 +33,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.compositionLocalOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateMapOf
@@ -111,7 +113,9 @@ fun LibraryBottomNav(
     order: List<LibraryTab>,
     onSelect: (LibraryTab) -> Unit,
     onSearch: () -> Unit,
+    onSettings: () -> Unit,
     modifier: Modifier = Modifier,
+    showUpdateDot: Boolean = false,
 ) {
     val reduceMotion = LocalReduceMotion.current
     Row(
@@ -223,6 +227,38 @@ fun LibraryBottomNav(
                 )
             }
         }
+
+        // Settings: a round button the size of Search, on the other side of the tabs.
+        val settingsLabel = stringResource(R.string.open_settings_cd)
+        val settingsSource = remember { MutableInteractionSource() }
+        Box(
+            modifier = Modifier
+                .size(52.dp)
+                .pressScale(settingsSource)
+                .clip(CircleShape)
+                .background(MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = BAR_SURFACE_ALPHA))
+                .border(1.dp, FloatingEdgeHighlight, CircleShape)
+                .clickable(
+                    interactionSource = settingsSource,
+                    indication = LocalIndication.current,
+                    role = Role.Button,
+                    onClick = onSettings,
+                )
+                .semantics { contentDescription = settingsLabel },
+            contentAlignment = Alignment.Center,
+        ) {
+            Icon(AppIcons.Settings, contentDescription = null, tint = MaterialTheme.colorScheme.onSurface)
+            if (showUpdateDot) {
+                // Small red dot at the top right of the gear: a new version was found by the automatic check.
+                Box(
+                    Modifier
+                        .align(Alignment.TopEnd)
+                        .padding(top = 12.dp, end = 12.dp)
+                        .size(9.dp)
+                        .background(Color(0xFFE53935), CircleShape),
+                )
+            }
+        }
     }
 }
 
@@ -310,24 +346,84 @@ fun AppTopBar(
     }
 }
 
+/** True when the user moved the back button to the floating one above the mini player (one-handed use). */
+val LocalFloatingBack = compositionLocalOf { false }
+
+/** THE back button of the app: one round button, used by every page title bar (Settings, hubs, details, Search). */
+@Composable
+fun AppBackButton(onClick: () -> Unit, modifier: Modifier = Modifier) {
+    if (LocalFloatingBack.current) {
+        // The floating button replaces it: only a little space is left, so the title does not touch the screen edge.
+        androidx.compose.foundation.layout.Spacer(modifier.size(8.dp))
+        return
+    }
+    androidx.compose.material3.Surface(
+        shape = CircleShape,
+        color = MaterialTheme.colorScheme.surfaceContainerHighest.copy(alpha = 0.8f),
+        modifier = modifier,
+    ) {
+        IconButton(onClick = onClick, modifier = Modifier.size(TopBarMetrics.ButtonSize)) {
+            Icon(AppIcons.ArrowBack, contentDescription = stringResource(R.string.back))
+        }
+    }
+}
+
+/** The back button for one-handed use: a round button of the size of the Search / Settings buttons, above the mini player. */
+@Composable
+fun FloatingBackButton(onClick: () -> Unit, modifier: Modifier = Modifier) {
+    val label = stringResource(R.string.back)
+    val source = remember { MutableInteractionSource() }
+    Box(
+        modifier = modifier
+            .size(52.dp)
+            .pressScale(source)
+            .clip(CircleShape)
+            .background(MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = BAR_SURFACE_ALPHA))
+            .border(1.dp, FloatingEdgeHighlight, CircleShape)
+            .clickable(
+                interactionSource = source,
+                indication = LocalIndication.current,
+                role = Role.Button,
+                onClick = onClick,
+            )
+            .semantics { contentDescription = label },
+        contentAlignment = Alignment.Center,
+    ) {
+        Icon(AppIcons.ArrowBack, contentDescription = null, tint = MaterialTheme.colorScheme.onSurface)
+    }
+}
+
 /** Compact top controls of the main tabs (no title): empty leading slot and the Settings button. */
 @Composable
 fun TopControls(
     onSettings: () -> Unit,
     modifier: Modifier = Modifier,
+    showUpdateDot: Boolean = false,
     leading: @Composable () -> Unit = {},
 ) {
     AppTopBar(
         modifier = modifier,
         leading = { Box(Modifier.weight(1f)) { leading() } },
-        trailing = { SettingsButton(onSettings) },
+        trailing = { SettingsButton(onSettings, showDot = showUpdateDot) },
     )
 }
 
 /** The global Settings button (48dp touch target). */
 @Composable
-fun SettingsButton(onClick: () -> Unit) {
+fun SettingsButton(onClick: () -> Unit, showDot: Boolean = false) {
     IconButton(onClick = onClick, modifier = Modifier.size(TopBarMetrics.ButtonSize)) {
-        Icon(AppIcons.Settings, contentDescription = stringResource(R.string.open_settings_cd))
+        Box {
+            Icon(AppIcons.Settings, contentDescription = stringResource(R.string.open_settings_cd))
+            if (showDot) {
+                // Small red dot at the top right of the gear: a new version was found by the automatic check.
+                Box(
+                    Modifier
+                        .align(Alignment.TopEnd)
+                        .offset(x = 2.dp, y = (-2).dp)
+                        .size(9.dp)
+                        .background(androidx.compose.ui.graphics.Color(0xFFE53935), androidx.compose.foundation.shape.CircleShape),
+                )
+            }
+        }
     }
 }

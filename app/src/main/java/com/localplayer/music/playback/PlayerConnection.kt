@@ -11,14 +11,19 @@ import androidx.media3.common.Player
 import androidx.media3.session.MediaController
 import androidx.media3.session.SessionToken
 import com.google.common.util.concurrent.ListenableFuture
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.stateIn
 import kotlin.coroutines.cancellation.CancellationException
 import kotlin.coroutines.resume
 import kotlin.coroutines.resumeWithException
 import kotlinx.coroutines.suspendCancellableCoroutine
-import kotlin.random.Random
 
 data class NowPlaying(
     val mediaId: String,
@@ -51,6 +56,10 @@ data class QueueEntry(
     val title: String,
     val artist: String,
     val artwork: ArtworkRef?,
+    /** Name of the Jam guest who added this entry; null for the host's own songs. */
+    val addedBy: String? = null,
+    /** Where the song is played from (a Jam host serves it to the guests from there). */
+    val sourceUri: String? = null,
 )
 
 /**
@@ -81,10 +90,37 @@ class PlayerConnection(private val context: Context) {
     private val controller: MediaController? get() = lifecycle.current
 
     private val _state = MutableStateFlow(PlayerState())
-    val state: StateFlow<PlayerState> = _state.asStateFlow()
-
     private val _queue = MutableStateFlow<List<QueueEntry>>(emptyList())
-    val queue: StateFlow<List<QueueEntry>> = _queue.asStateFlow()
+
+    /** What the screens show while this phone is a Jam guest: the Jam's song, queue and position instead of the phone's own player. */
+    class RemoteView(val state: PlayerState, val queue: List<QueueEntry>, val positionMs: () -> Long)
+
+    /** Lets a running Jam take over the buttons (next / previous become votes, a guest's play / pause is its own switch). */
+    interface JamHook {
+        /** True when the press was handled by the Jam. */
+        fun next(): Boolean
+
+        fun previous(): Boolean
+
+        fun playPause(): Boolean
+    }
+
+    @Volatile
+    var jamHook: JamHook? = null
+
+    private val remote = MutableStateFlow<RemoteView?>(null)
+    private val viewScope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
+
+    val state: StateFlow<PlayerState> =
+        combine(_state, remote) { own, shared -> shared?.state ?: own }.stateIn(viewScope, SharingStarted.Eagerly, PlayerState())
+
+    val queue: StateFlow<List<QueueEntry>> =
+        combine(_queue, remote) { own, shared -> shared?.queue ?: own }.stateIn(viewScope, SharingStarted.Eagerly, emptyList())
+
+    /** A Jam guest shows the Jam here (null = the phone's own player again). */
+    fun setRemote(view: RemoteView?) {
+        remote.value = view
+    }
 
     private val _positionJumps = MutableStateFlow(0)
     /** Increases on every seek / position jump, so a synchronized view can re-sync even while paused. */
@@ -167,6 +203,8 @@ class PlayerConnection(private val context: Context) {
 
     /** Fire-and-forget command: runs when connected, is dropped if the connection is abandoned first. */
     private fun withController(action: (MediaController) -> Unit) {
+        // While a Jam guest watches the Jam, the phone's own queue is not touched by taps on the Jam's queue.
+        if (remote.value != null) return
         runOnMain { submit(Command(onRun = { action(it) }, onCancel = {})) }
     }
 
@@ -205,7 +243,23 @@ class PlayerConnection(private val context: Context) {
         markStarted(it)
     }
 
-    fun togglePlayPause() = withController {
+    /** Jam: hold the music while the guests are still loading their songs. */
+    fun pause() = withController { it.pause() }
+
+    /** Jam: start the music at the moment the host chose. */
+    fun play() = withController {
+        if (it.playbackState == Player.STATE_IDLE) it.prepare()
+        it.play()
+    }
+
+    fun togglePlayPause() {
+        if (jamHook?.playPause() == true) return
+        withController {
+            toggleOwnPlayPause(it)
+        }
+    }
+
+    private fun toggleOwnPlayPause(it: MediaController) {
         if (it.isPlaying || (it.playWhenReady && it.playbackState == Player.STATE_BUFFERING)) {
             it.pause()
         } else {
@@ -236,9 +290,21 @@ class PlayerConnection(private val context: Context) {
         }
     }
 
-    fun next() = withController { it.seekToNextMediaItem() }
+    fun next() {
+        if (jamHook?.next() == true) return
+        withController { it.seekToNextMediaItem() }
+    }
 
-    fun previous() = withController { it.seekToPrevious() }
+    fun previous() {
+        if (jamHook?.previous() == true) return
+        withController { it.seekToPrevious() }
+    }
+
+    /** Goes to the next song without asking the Jam (the vote already passed). */
+    fun nextTrack() = withController { it.seekToNextMediaItem() }
+
+    /** Goes to the song before this one, even when this one has been playing for a while (a vote in a Jam). */
+    fun previousTrack() = withController { it.seekToPreviousMediaItem() }
 
     fun seekTo(positionMs: Long) = withController { it.seekTo(positionMs) }
 
@@ -336,11 +402,6 @@ class PlayerConnection(private val context: Context) {
 
     /** Undo of either Clear; false (and nothing changed) when the queue is no longer what the Clear left. */
     suspend fun undoClearQueue(cleared: QueueOps.Cleared): Boolean = request { c -> QueueOps.undoClear(c, cleared) }
-
-    fun moveQueueItem(from: Int, to: Int) = withController {
-        val count = it.mediaItemCount
-        if (from in 0 until count && to in 0 until count && from != to) it.moveMediaItem(from, to)
-    }
 
     // --- Editing the file of a queued track -------------------------------------------------
 
@@ -470,9 +531,27 @@ class PlayerConnection(private val context: Context) {
         QueueOps.insertNextOccurrence(c, item).also { if (it.becameCurrent) startTracker.onAddedToEmptyQueue(it.occurrenceId) }
     }
 
+    /**
+     * A song a Jam guest sent: right after the current song, after the guests' songs already waiting there (see
+     * [com.localplayer.music.jam.JamQueue]). Pure `addMediaItem`; the current song and position are never touched.
+     */
+    suspend fun insertJamOccurrence(item: MediaItem): QueueOps.Added = request { c ->
+        val id = QueueOccurrence.newId()
+        val tagged = MediaItemFactory.withOccurrence(item, id)
+        val wasEmpty = c.mediaItemCount == 0
+        if (wasEmpty) {
+            c.setMediaItems(listOf(tagged))
+            c.prepare()
+        } else {
+            val fromGuest = (0 until c.mediaItemCount).map { MediaItemFactory.addedBy(c.getMediaItemAt(it)) != null }
+            c.addMediaItem(com.localplayer.music.jam.JamQueue.insertIndex(c.currentMediaItemIndex, fromGuest), tagged)
+        }
+        QueueOps.Added(id, wasEmpty).also { if (it.becameCurrent) startTracker.onAddedToEmptyQueue(it.occurrenceId) }
+    }
+
     // --- Position (polled by the UI only while it is visible) -----------------------------
 
-    fun currentPositionMs(): Long = controller?.currentPosition ?: lastPositionMs
+    fun currentPositionMs(): Long = remote.value?.positionMs?.invoke() ?: controller?.currentPosition ?: lastPositionMs
 
 
     // --- State publishing ----------------------------------------------------------------
@@ -487,7 +566,7 @@ class PlayerConnection(private val context: Context) {
                 album = it.mediaMetadata.albumTitle?.toString().orEmpty(),
                 artwork = MediaItemFactory.artworkRef(it),
                 durationHintMs = it.mediaMetadata.durationMs ?: 0L,
-                uri = MediaItemFactory.trackUri(it),
+                uri = MediaItemFactory.libraryUri(it),
             )
         }
         val playing = player.isPlaying ||
@@ -524,6 +603,8 @@ class PlayerConnection(private val context: Context) {
                     title = item.mediaMetadata.title?.toString().orEmpty(),
                     artist = item.mediaMetadata.artist?.toString().orEmpty(),
                     artwork = MediaItemFactory.artworkRef(item),
+                    addedBy = MediaItemFactory.addedBy(item),
+                    sourceUri = item.localConfiguration?.uri?.toString(),
                 ),
             )
         }

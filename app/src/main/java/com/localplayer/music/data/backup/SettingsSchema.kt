@@ -49,6 +49,7 @@ object SettingsSchema {
         bool("yourMixCardDismissed", "yourMix"),
         text("mixSettings", "yourMix") { MixSettings.parse(it).serialize() == it },
         bool("autoUpdateCheck", "updates"),
+        bool("includeBetaUpdates", "updates"),
         // optional features: activation switches are never restored by default
         bool("widgetsEnabled", "widgets", activation = true),
         bool("replayGainEnabled", "replayGain", activation = true),
@@ -68,13 +69,22 @@ object SettingsSchema {
         "lastUpdateCheckAt" to "Internal timestamp of this installation.",
         "knownNewerVersion" to "Internal state of this installation.",
         "backgroundVersion / customFontVersion" to "Cache keys; the picture and font FILES are backed up instead (.lpbackup only).",
-        "library folders, hidden songs, playlists, favourites, history, listening statistics" to
-            "Library data, not settings (folder access is device-specific and cannot be transferred).",
+        "autoBackupEnabled / autoBackupFolder / androidBackupCopy and their timestamps" to
+            "Device-specific (a folder permission cannot be transferred); the user switches them on per device.",
+        "artworkBlur / blurEverywhere / blurStrength" to "Per-device background choice of version 1.7 (the colours switch stays in the format).",
+        "gridMode_songs / _albums / _artists / _genres / _playlists" to
+            "Per-device list/grid choice of version 1.6.2, kept out of the settings format (schema stays 1).",
+        "restoreQueue / keepPlayerAfterClose / fadeBetweenSongs / fadeSeconds / lyricsInPlayer / lyricsFill / hideFileInfoChip / backButtonSide / actionRowStyle / actionRowSide" to
+            "Per-device feature switches of version 1.6, kept out of the settings format (schema stays 1).",
+        "jamEnabled" to "Optional feature switch of version 1.9.81; each device switches it on itself (it opens a local network server).",
+        "library folders" to "Folder access is device-specific and cannot be transferred.",
+        "playlists, favourites, history, statistics, hidden songs, artist rules" to
+            "Library data, not settings: they travel in library.json of a complete .lpbackup (see LibraryBackupManager).",
     )
 
     class Validation(val valid: Map<String, Any>, val rejected: Map<String, String>, val unknown: List<String>)
 
-    /** Keeps only known keys with correctly typed, allowed values. Numbers from JSON (Double) are converted to Float. */
+    /** Keeps only known keys with correctly typed, allowed values. Numbers from JSON (Int, Long or Double) are converted to Float. */
     fun validate(raw: Map<String, Any?>): Validation {
         val valid = LinkedHashMap<String, Any>()
         val rejected = LinkedHashMap<String, String>()
@@ -85,7 +95,8 @@ object SettingsSchema {
             val typed: Any? = when (def.type) {
                 SettingType.BOOL -> value as? Boolean
                 SettingType.STRING -> value as? String
-                SettingType.FLOAT -> (value as? Double)?.toFloat()
+                // JSON numbers may arrive as Int / Long / Double (a hand-edited "1" is as valid as "1.0"); NaN / infinity never are.
+                SettingType.FLOAT -> (value as? Number)?.toFloat()?.takeIf { it.isFinite() }
             }
             when {
                 typed == null -> rejected[key] = "wrong type"

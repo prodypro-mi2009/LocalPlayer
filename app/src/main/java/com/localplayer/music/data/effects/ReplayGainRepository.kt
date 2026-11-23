@@ -1,7 +1,7 @@
 package com.localplayer.music.data.effects
 
+import androidx.core.net.toUri
 import android.content.Context
-import android.net.Uri
 import android.util.LruCache
 import com.localplayer.music.data.metadata.AudioSniffer
 import kotlinx.coroutines.Dispatchers
@@ -24,9 +24,9 @@ class ReplayGainRepository(private val context: Context) {
 
     suspend fun info(trackId: Long, uri: String): ReplayGainInfo = cache.get(trackId) ?: withContext(Dispatchers.IO) {
         val result = try {
-            context.contentResolver.openFileDescriptor(Uri.parse(uri), "r")?.use { pfd ->
+            context.contentResolver.openFileDescriptor(uri.toUri(), "r")?.use { pfd ->
                 val file = File("/proc/self/fd/${pfd.fd}")
-                val container = AudioSniffer.sniff(file, Uri.parse(uri).lastPathSegment.orEmpty())
+                val container = AudioSniffer.sniff(file, uri.toUri().lastPathSegment.orEmpty())
                 if (!container.tagWritable) ReplayGainInfo() else ReplayGainReader.read(file, container.workingExtension)
             } ?: ReplayGainInfo()
         } catch (e: Exception) {

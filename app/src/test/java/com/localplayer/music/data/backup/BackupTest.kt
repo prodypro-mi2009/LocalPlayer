@@ -4,7 +4,6 @@ import org.junit.Assert.*
 import org.junit.Test
 import java.io.ByteArrayInputStream
 import java.io.ByteArrayOutputStream
-import java.io.File
 import java.util.zip.ZipEntry
 import java.util.zip.ZipOutputStream
 
@@ -133,5 +132,14 @@ class BackupTest {
         val huge = ByteArray((BackupFormat.MAX_ENTRY_BYTES + 1).toInt())
         val o = ByteArrayOutputStream(); BackupArchive.write(o, json, "1", 1L, listOf(BackupArchive.Asset(BackupFormat.BACKGROUND_PATH) { ByteArrayInputStream(huge) }))
         try { BackupArchive.read(ByteArrayInputStream(o.toByteArray()), tmp()); fail() } catch (e: BackupFormat.InvalidBackup) { }
+    }
+
+    @Test fun floatSetting_acceptsAnyJsonNumber_butNotNaN() {
+        assertEquals(1f, SettingsSchema.validate(mapOf("backgroundDim" to 1)).valid["backgroundDim"])
+        assertEquals(0f, SettingsSchema.validate(mapOf("backgroundDim" to 0L)).valid["backgroundDim"])
+        assertEquals(0.5f, SettingsSchema.validate(mapOf("backgroundDim" to 0.5)).valid["backgroundDim"])
+        val bad = SettingsSchema.validate(mapOf("backgroundDim" to Double.NaN, "backgroundDim2" to 1))
+        assertEquals(setOf("backgroundDim"), bad.rejected.keys)
+        assertEquals(listOf("backgroundDim2"), bad.unknown)
     }
 }

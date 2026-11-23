@@ -57,7 +57,7 @@ class SessionPersistenceTest {
         assertNotNull(loaded)
         assertEquals(q, loaded!!.queue)
         assertEquals("occ-2", loaded.state!!.currentOccurrenceId)
-        assertEquals(1234L, loaded.state!!.positionMs)
+        assertEquals(1234L, loaded.state.positionMs)
     }
 
     @Test fun anEmptyQueueNeverReplacesAValidSnapshot() {

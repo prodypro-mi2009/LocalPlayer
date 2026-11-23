@@ -9,9 +9,12 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.PaddingValues
+import com.localplayer.music.data.library.ScanFailureKind
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.statusBars
+import androidx.compose.foundation.layout.windowInsetsTopHeight
 import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -21,8 +24,6 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.grid.GridCells
-import androidx.compose.foundation.lazy.grid.GridItemSpan
-import androidx.compose.foundation.lazy.grid.LazyGridState
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.lazy.grid.itemsIndexed
@@ -30,21 +31,14 @@ import androidx.compose.foundation.lazy.grid.rememberLazyGridState
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
-import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
-import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
-import androidx.compose.animation.core.Animatable
-import androidx.compose.animation.core.tween
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
-import androidx.compose.ui.graphics.graphicsLayer
-import com.localplayer.music.ui.theme.Motion
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
@@ -59,13 +53,13 @@ import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.localplayer.music.R
-import com.localplayer.music.data.db.TrackListItem
 import com.localplayer.music.data.library.AlbumItem
 import com.localplayer.music.data.library.AlbumSort
 import com.localplayer.music.data.library.AlphabetIndex
@@ -83,21 +77,28 @@ import com.localplayer.music.ui.components.ArtworkCollage
 import com.localplayer.music.ui.components.ArtworkImage
 import com.localplayer.music.ui.components.ArtworkRow
 import com.localplayer.music.ui.components.EmptyState
-import com.localplayer.music.ui.components.FastScrollbar
+import com.localplayer.music.ui.components.ThumbScrollbar
+import com.localplayer.music.ui.components.thumbAdapter
 import com.localplayer.music.ui.components.GenreStyle
 import com.localplayer.music.ui.components.LibraryActionRow
+import com.localplayer.music.ui.components.scrollEstimate
+import com.localplayer.music.ui.components.rememberActionRowProgress
+import com.localplayer.music.ui.components.TabFadeHeight
+import com.localplayer.music.ui.components.actionRowContentTop
+import com.localplayer.music.ui.components.actionRowListInset
+import androidx.compose.runtime.derivedStateOf
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.zIndex
 import com.localplayer.music.ui.components.topFade
 import com.localplayer.music.ui.components.FadingLazyColumn
 import androidx.compose.foundation.pager.HorizontalPager
 import androidx.compose.foundation.pager.PagerState
 import com.localplayer.music.ui.components.LibraryTab
-import com.localplayer.music.ui.components.NameDialog
 import com.localplayer.music.ui.components.NewPlaylistFlow
 import com.localplayer.music.ui.components.SongGridCard
 import com.localplayer.music.ui.components.SongMenuController
 import com.localplayer.music.ui.components.SortOption
 import com.localplayer.music.ui.components.TextRow
-import com.localplayer.music.ui.components.TopControls
 import com.localplayer.music.ui.components.barPadding
 import com.localplayer.music.ui.components.TrackRow
 import com.localplayer.music.ui.components.ViewMode
@@ -107,7 +108,14 @@ import com.localplayer.music.ui.nav.NavState
 import com.localplayer.music.ui.nav.Screen
 import com.localplayer.music.ui.theme.DisplayHeavy
 import com.localplayer.music.ui.theme.DisplayHeavyCard
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+
+/** True once the neighbouring tab has been built in this run of the app (so coming back to Home does not wait again). */
+private var neighbourTabBuilt = false
+
+/** How long after the first frame the neighbouring tab is built. */
+private const val NEIGHBOUR_TAB_DELAY_MS = 1_500L
 
 @Composable
 fun HomeScreen(
@@ -119,12 +127,21 @@ fun HomeScreen(
 ) {
     val scan by viewModel.scanState.collectAsStateWithLifecycle()
     val stateHolder = rememberSaveableStateHolder()
+    // At app start only the tab in view is built, so ITS covers load first; the neighbouring tab is built a moment later.
+    var neighbourReady by remember { mutableStateOf(neighbourTabBuilt) }
+    LaunchedEffect(Unit) {
+        if (!neighbourReady) {
+            delay(NEIGHBOUR_TAB_DELAY_MS)
+            neighbourTabBuilt = true
+            neighbourReady = true
+        }
+    }
 
     Column(Modifier.fillMaxSize()) {
-        // Compact top controls: no big title; Settings at the top right.
-        TopControls(onSettings = { nav.push(Screen.Settings) })
+        // No top bar: Settings is the round button at the right end of the bottom bar. Only the status bar is cleared.
+        Spacer(Modifier.windowInsetsTopHeight(WindowInsets.statusBars))
         // No progress bar on Home while the (fast, incremental) scan runs at start-up; Settings > Scanning still shows it.
-        if (!scan.isScanning && scan.error != null) ScanErrorBanner(scan, onRetry = viewModel::rescan)
+        if (!scan.isScanning && scan.error != null) ScanErrorBanner(scan, onRetry = viewModel::rescan, onRemoveFolder = viewModel::removeLibraryFolder, onRelinkFolder = viewModel::relinkLibraryFolder)
 
         // One saved-state slot per tab: leaving a tab stores its scroll position, grid/list mode and sort,
         // coming back restores them. The tabs are the pages of a pager: a horizontal swipe drags the whole page 1:1
@@ -133,7 +150,14 @@ fun HomeScreen(
         HorizontalPager(
             state = pagerState,
             modifier = Modifier.fillMaxSize(),
-            beyondViewportPageCount = 0,
+            // The neighbouring tabs are composed BEFORE they slide in (like the tabs of the Music 3.8 app, which keeps its
+            // pages mounted): the first swipe to a tab no longer builds a whole list while the finger is moving.
+            beyondViewportPageCount = if (neighbourReady) 1 else 0,
+            // A page changes after a shorter drag (5% instead of the default 50%): the swipe feels lighter.
+            flingBehavior = androidx.compose.foundation.pager.PagerDefaults.flingBehavior(
+                state = pagerState,
+                snapPositionalThreshold = 0.05f,
+            ),
             key = { page -> tabs.getOrNull(page)?.name ?: page },
         ) { page ->
             val tab = tabs.getOrElse(page) { LibraryTab.HOME }
@@ -153,6 +177,10 @@ fun HomeScreen(
 
 // ---------------------------------------------------------------- Home = Favorites
 
+/** Height of the Shuffle / History row inside the Favorites list (the 48 dp button plus 8 dp above and below). */
+private val HomeActionRowHeight = 64.dp
+
+
 @Composable
 private fun HomeTab(viewModel: LibraryViewModel, nav: NavState, menu: SongMenuController) {
     val favorites by viewModel.favoriteTracks.collectAsStateWithLifecycle()
@@ -161,7 +189,31 @@ private fun HomeTab(viewModel: LibraryViewModel, nav: NavState, menu: SongMenuCo
     val list = favorites ?: return
     val yourMixDismissed by viewModel.settings.yourMixCardDismissed.collectAsStateWithLifecycle()
 
-    FadingLazyColumn(Modifier.fillMaxSize(), contentPadding = barPadding(extra = 16.dp)) {
+    val favState = rememberLazyListState()
+    // Index of the Shuffle row: after the optional Your Mix card and the title. Once it has scrolled away it lives on as a pill.
+    val actionRowIndex = (if (yourMixDismissed) 0 else 1) + 1
+    // How far the list has moved the Shuffle row away (px): 0 while the row is still in place, then it grows as the row
+    // leaves and the content below it passes. The floating copy at the top fades in while the row leaves, and then the
+    // buttons glide together and the pill forms in step with the same scrolling (and back again when scrolling up).
+    val density = androidx.compose.ui.platform.LocalDensity.current
+    val rowHeightPx = with(density) { HomeActionRowHeight.toPx() }
+    val fadeStartPx = with(density) { 24.dp.toPx() }
+    val packRangePx = with(density) { com.localplayer.music.ui.components.ActionRowScrollRange.toPx() }
+    val away = remember(actionRowIndex, rowHeightPx) {
+        derivedStateOf {
+            when {
+                favState.firstVisibleItemIndex < actionRowIndex -> 0f
+                favState.firstVisibleItemIndex == actionRowIndex -> favState.firstVisibleItemScrollOffset.toFloat()
+                favState.firstVisibleItemIndex == actionRowIndex + 1 -> rowHeightPx + favState.firstVisibleItemScrollOffset
+                else -> rowHeightPx + packRangePx
+            }
+        }
+    }
+    val classicRow = com.localplayer.music.ui.components.LocalClassicActionRow.current
+    // Classic look: no floating copy, the row just scrolls away with the list.
+    val overlayShown by remember(fadeStartPx, classicRow) { derivedStateOf { !classicRow && away.value > fadeStartPx } }
+    Box(Modifier.fillMaxSize()) {
+    FadingLazyColumn(Modifier.fillMaxSize(), state = favState, fadeHeight = TabFadeHeight, contentPadding = barPadding(extra = 16.dp)) {
         // Your Mix is its own, dynamic collection: a separate card ABOVE the Favorites, never mixed into them.
         if (!yourMixDismissed) item(key = "your-mix") { YourMixCard(onOpen = { nav.push(Screen.YourMix) }, onHide = { viewModel.setYourMixCardDismissed(true) }) }
         item {
@@ -217,6 +269,33 @@ private fun HomeTab(viewModel: LibraryViewModel, nav: NavState, menu: SongMenuCo
             )
         }
     }
+    // Once the Shuffle row has scrolled away it stays on top as a pill (see [away] above).
+    if (overlayShown) {
+        com.localplayer.music.ui.components.ActionRowLayout(
+            progress = { ((away.value - rowHeightPx) / packRangePx).coerceIn(0f, 1f) },
+            modifier = Modifier.zIndex(1f).graphicsLayer {
+                alpha = ((away.value - fadeStartPx) / (rowHeightPx - fadeStartPx)).coerceIn(0f, 1f)
+            },
+        ) {
+            androidx.compose.material3.FilledTonalButton(
+                onClick = { viewModel.playAll(list, shuffle = true) },
+                enabled = list.isNotEmpty(),
+                colors = com.localplayer.music.ui.theme.tonalButtonColors(),
+            ) {
+                Icon(AppIcons.Shuffle, contentDescription = null, modifier = Modifier.size(18.dp))
+                Spacer(Modifier.width(8.dp))
+                Text(stringResource(R.string.shuffle_favorites))
+            }
+            androidx.compose.material3.FilledTonalIconButton(
+                onClick = { nav.push(Screen.Recent) },
+                modifier = Modifier.size(48.dp),
+                shape = androidx.compose.foundation.shape.CircleShape,
+            ) {
+                Icon(AppIcons.History, contentDescription = stringResource(R.string.recently_played_cd), modifier = Modifier.size(28.dp))
+            }
+        }
+    }
+    }
 }
 
 /** Asymmetric collage: one large tile and two stacked small ones, from local artwork only. */
@@ -231,6 +310,7 @@ private fun FavoritesCollage(artworks: List<com.localplayer.music.playback.Artwo
             artwork = artworks[0],
             size = 200.dp,
             cornerRadius = 32.dp,
+            maxLoadPx = 512,
             modifier = Modifier.weight(1.4f).fillMaxSize(),
         )
         if (artworks.size > 1) {
@@ -349,10 +429,11 @@ private fun SongsTab(viewModel: LibraryViewModel, menu: SongMenuController) {
     val playerState by viewModel.playerState.collectAsStateWithLifecycle()
     val scan by viewModel.scanState.collectAsStateWithLifecycle()
     val currentId = playerState.nowPlaying?.mediaId?.toLongOrNull()
-    var gridMode by rememberSaveable { mutableStateOf(false) }
+    var gridMode by rememberSaveable { mutableStateOf(viewModel.settings.gridMode("songs", false)) }
     val scope = rememberCoroutineScope()
     val listState = rememberLazyListState()
     val gridState = rememberLazyGridState()
+    val rowProgress = rememberActionRowProgress { if (gridMode) gridState.scrollEstimate() else listState.scrollEstimate() }
 
     val list = songs ?: return
     if (list.isEmpty() && !scan.isScanning) {
@@ -376,11 +457,13 @@ private fun SongsTab(viewModel: LibraryViewModel, menu: SongMenuController) {
         scope.launch { if (gridMode) gridState.scrollToItem(index) else listState.scrollToItem(index) }
     }
 
-    Column(Modifier.fillMaxSize()) {
+    Box(Modifier.fillMaxSize()) {
         LibraryActionRow(
+            modifier = Modifier.zIndex(1f),
+            progress = rowProgress,
             onShuffle = { viewModel.playAll(list, shuffle = true) },
             viewMode = if (gridMode) ViewMode.GRID else ViewMode.LIST,
-            onToggleView = { gridMode = !gridMode },
+            onToggleView = { gridMode = !gridMode; viewModel.settings.setGridMode("songs", gridMode) },
             sortOptions = SongSort.entries.map { option ->
                 SortOption(sortLabel(option), option == sort) { viewModel.setSort(option) }
             },
@@ -389,14 +472,26 @@ private fun SongsTab(viewModel: LibraryViewModel, menu: SongMenuController) {
                 if (at >= 0) jumpTo(at)
             },
         )
-        Row(Modifier.fillMaxSize()) {
-            Box(Modifier.weight(1f).fillMaxSize()) {
+        // Scroll bar: an overlay on top of the list, which uses the whole width (the slim thumb sits in the right margin).
+        val scrollAdapter = remember(gridMode, listState, gridState) {
+            if (gridMode) gridState.thumbAdapter(columns = 2) else listState.thumbAdapter()
+        }
+        // The letter in the bubble only when the list is ordered by a name; for other sorts it is a plain scroll bar.
+        val letterOf: ((Int) -> String?)? = remember(sections) {
+            sections?.let { map ->
+                val sectionAt = AlphabetIndex.sectionAtIndex(map)
+                val lookup: (Int) -> String? = { index -> sectionAt(index)?.toString() }
+                lookup
+            }
+        }
+        Box(Modifier.fillMaxSize()) {
+            Box(Modifier.fillMaxSize()) {
                 if (gridMode) {
                     LazyVerticalGrid(
                         columns = GridCells.Fixed(2),
                         state = gridState,
-                        modifier = Modifier.fillMaxSize().topFade(gridState),
-                        contentPadding = barPadding(extra = 12.dp, horizontal = 12.dp, top = 12.dp),
+                        modifier = Modifier.actionRowListInset().fillMaxSize().topFade(gridState, TabFadeHeight),
+                        contentPadding = barPadding(extra = 12.dp, horizontal = 12.dp, top = actionRowContentTop(8.dp)),
                         horizontalArrangement = Arrangement.spacedBy(10.dp),
                         verticalArrangement = Arrangement.spacedBy(10.dp),
                     ) {
@@ -410,7 +505,7 @@ private fun SongsTab(viewModel: LibraryViewModel, menu: SongMenuController) {
                         }
                     }
                 } else {
-                    LazyColumn(Modifier.fillMaxSize().topFade(listState), state = listState, contentPadding = barPadding(extra = 8.dp)) {
+                    LazyColumn(Modifier.actionRowListInset().fillMaxSize().topFade(listState, TabFadeHeight), state = listState, contentPadding = barPadding(extra = 8.dp, top = actionRowContentTop())) {
                         itemsIndexed(
                             items = list,
                             key = { _, song -> song.id },
@@ -427,13 +522,12 @@ private fun SongsTab(viewModel: LibraryViewModel, menu: SongMenuController) {
                     }
                 }
             }
-            if (sections != null) {
-                FastScrollbar(
-                    letters = sections.keys.toList(),
-                    onLetter = { letter -> sections[letter]?.let { jumpTo(it) } },
-                    modifier = Modifier.padding(end = 2.dp),
-                )
-            }
+        ThumbScrollbar(
+            adapter = scrollAdapter,
+            letterAt = letterOf,
+            modifier = Modifier.fillMaxSize(),
+            bottomInset = com.localplayer.music.ui.components.LocalBottomBarInset.current,
+        )
         }
     }
 }
@@ -443,7 +537,7 @@ private fun SongsTab(viewModel: LibraryViewModel, menu: SongMenuController) {
 @Composable
 private fun AlbumsTab(viewModel: LibraryViewModel, nav: NavState) {
     val albums by viewModel.albums.collectAsStateWithLifecycle()
-    var gridMode by rememberSaveable { mutableStateOf(true) }
+    var gridMode by rememberSaveable { mutableStateOf(viewModel.settings.gridMode("albums", true)) }
     var sortIndex by rememberSaveable { mutableIntStateOf(0) }
     val raw = albums ?: return
     if (raw.isEmpty()) {
@@ -458,23 +552,27 @@ private fun AlbumsTab(viewModel: LibraryViewModel, nav: NavState) {
         stringResource(R.string.sort_year),
         stringResource(R.string.sort_song_count),
     )
-    Column(Modifier.fillMaxSize()) {
+    val fadeGrid = rememberLazyGridState()
+    val fadeList = rememberLazyListState()
+    val rowProgress = rememberActionRowProgress { if (gridMode) fadeGrid.scrollEstimate() else fadeList.scrollEstimate() }
+    Box(Modifier.fillMaxSize()) {
         LibraryActionRow(
+            modifier = Modifier.zIndex(1f),
+            progress = rowProgress,
             onShuffle = {
                 val keys = list.map { it.groupKey }.toSet()
                 viewModel.shuffleSongs { it.albumGroupKey in keys }
             },
             viewMode = if (gridMode) ViewMode.GRID else ViewMode.LIST,
-            onToggleView = { gridMode = !gridMode },
+            onToggleView = { gridMode = !gridMode; viewModel.settings.setGridMode("albums", gridMode) },
             sortOptions = AlbumSort.entries.mapIndexed { i, _ -> SortOption(labels[i], i == sortIndex) { sortIndex = i } },
         )
         if (gridMode) {
-            val fadeGrid = rememberLazyGridState()
             LazyVerticalGrid(
                 state = fadeGrid,
                 columns = GridCells.Fixed(2),
-                modifier = Modifier.fillMaxSize().topFade(fadeGrid),
-                contentPadding = barPadding(extra = 12.dp, horizontal = 12.dp, top = 12.dp),
+                modifier = Modifier.actionRowListInset().fillMaxSize().topFade(fadeGrid, TabFadeHeight),
+                contentPadding = barPadding(extra = 12.dp, horizontal = 12.dp, top = actionRowContentTop(8.dp)),
                 horizontalArrangement = Arrangement.spacedBy(12.dp),
                 verticalArrangement = Arrangement.spacedBy(12.dp),
             ) {
@@ -483,8 +581,7 @@ private fun AlbumsTab(viewModel: LibraryViewModel, nav: NavState) {
                 }
             }
         } else {
-            val fadeList = rememberLazyListState()
-            LazyColumn(Modifier.fillMaxSize().topFade(fadeList), state = fadeList, contentPadding = barPadding(extra = 8.dp)) {
+            LazyColumn(Modifier.actionRowListInset().fillMaxSize().topFade(fadeList, TabFadeHeight), state = fadeList, contentPadding = barPadding(extra = 8.dp, top = actionRowContentTop())) {
                 items(list, key = { it.groupKey }) { album ->
                     ArtworkRow(
                         artwork = album.artwork,
@@ -552,7 +649,7 @@ fun AlbumCard(album: AlbumItem, modifier: Modifier = Modifier, onClick: () -> Un
 @Composable
 private fun ArtistsTab(viewModel: LibraryViewModel, nav: NavState) {
     val artists by viewModel.artists.collectAsStateWithLifecycle()
-    var gridMode by rememberSaveable { mutableStateOf(false) }
+    var gridMode by rememberSaveable { mutableStateOf(viewModel.settings.gridMode("artists", false)) }
     var sortIndex by rememberSaveable { mutableIntStateOf(0) }
     val raw = artists ?: return
     if (raw.isEmpty()) {
@@ -562,23 +659,27 @@ private fun ArtistsTab(viewModel: LibraryViewModel, nav: NavState) {
     val list = remember(raw, sortIndex) { LibrarySorting.artists(raw, NameCountSort.entries[sortIndex]) }
     val unknown = stringResource(R.string.unknown_artist)
     val labels = listOf(stringResource(R.string.sort_name), stringResource(R.string.sort_song_count))
-    Column(Modifier.fillMaxSize()) {
+    val fadeGrid = rememberLazyGridState()
+    val fadeList = rememberLazyListState()
+    val rowProgress = rememberActionRowProgress { if (gridMode) fadeGrid.scrollEstimate() else fadeList.scrollEstimate() }
+    Box(Modifier.fillMaxSize()) {
         LibraryActionRow(
+            modifier = Modifier.zIndex(1f),
+            progress = rowProgress,
             onShuffle = {
                 val keys = list.map { it.key }.toSet()
                 viewModel.shuffleSongs { (it.primaryArtistKey ?: "") in keys }
             },
             viewMode = if (gridMode) ViewMode.GRID else ViewMode.LIST,
-            onToggleView = { gridMode = !gridMode },
+            onToggleView = { gridMode = !gridMode; viewModel.settings.setGridMode("artists", gridMode) },
             sortOptions = labels.mapIndexed { i, l -> SortOption(l, i == sortIndex) { sortIndex = i } },
         )
         if (gridMode) {
-            val fadeGrid = rememberLazyGridState()
             LazyVerticalGrid(
                 state = fadeGrid,
                 columns = GridCells.Fixed(2),
-                modifier = Modifier.fillMaxSize().topFade(fadeGrid),
-                contentPadding = barPadding(extra = 12.dp, horizontal = 12.dp, top = 12.dp),
+                modifier = Modifier.actionRowListInset().fillMaxSize().topFade(fadeGrid, TabFadeHeight),
+                contentPadding = barPadding(extra = 12.dp, horizontal = 12.dp, top = actionRowContentTop(8.dp)),
                 horizontalArrangement = Arrangement.spacedBy(12.dp),
                 verticalArrangement = Arrangement.spacedBy(12.dp),
             ) {
@@ -612,8 +713,7 @@ private fun ArtistsTab(viewModel: LibraryViewModel, nav: NavState) {
                 }
             }
         } else {
-            val fadeList = rememberLazyListState()
-            LazyColumn(Modifier.fillMaxSize().topFade(fadeList), state = fadeList, contentPadding = barPadding(extra = 8.dp)) {
+            LazyColumn(Modifier.actionRowListInset().fillMaxSize().topFade(fadeList, TabFadeHeight), state = fadeList, contentPadding = barPadding(extra = 8.dp, top = actionRowContentTop())) {
                 items(list, key = { it.key }) { artist ->
                     // Circular local artwork (the artist's own tracks only; never remote images).
                     ArtistRow(artist, unknown) { nav.push(Screen.Artist(artist.key, artist.name.orEmpty())) }
@@ -652,7 +752,7 @@ private fun ArtistRow(artist: ArtistItem, unknown: String, onClick: () -> Unit) 
 @Composable
 private fun GenresTab(viewModel: LibraryViewModel, nav: NavState) {
     val genres by viewModel.genres.collectAsStateWithLifecycle()
-    var gridMode by rememberSaveable { mutableStateOf(true) }
+    var gridMode by rememberSaveable { mutableStateOf(viewModel.settings.gridMode("genres", true)) }
     var sortIndex by rememberSaveable { mutableIntStateOf(0) }
     val raw = genres ?: return
     if (raw.isEmpty()) {
@@ -662,23 +762,27 @@ private fun GenresTab(viewModel: LibraryViewModel, nav: NavState) {
     val list = remember(raw, sortIndex) { LibrarySorting.genres(raw, NameCountSort.entries[sortIndex]) }
     val unknown = stringResource(R.string.unknown_genre)
     val labels = listOf(stringResource(R.string.sort_name), stringResource(R.string.sort_song_count))
-    Column(Modifier.fillMaxSize()) {
+    val fadeGrid = rememberLazyGridState()
+    val fadeList = rememberLazyListState()
+    val rowProgress = rememberActionRowProgress { if (gridMode) fadeGrid.scrollEstimate() else fadeList.scrollEstimate() }
+    Box(Modifier.fillMaxSize()) {
         LibraryActionRow(
+            modifier = Modifier.zIndex(1f),
+            progress = rowProgress,
             onShuffle = {
                 val keys = list.map { it.key }.toSet()
                 viewModel.shuffleSongs { (TextNormalizer.groupKey(it.genre) ?: "") in keys }
             },
             viewMode = if (gridMode) ViewMode.GRID else ViewMode.LIST,
-            onToggleView = { gridMode = !gridMode },
+            onToggleView = { gridMode = !gridMode; viewModel.settings.setGridMode("genres", gridMode) },
             sortOptions = labels.mapIndexed { i, l -> SortOption(l, i == sortIndex) { sortIndex = i } },
         )
         if (gridMode) {
-            val fadeGrid = rememberLazyGridState()
             LazyVerticalGrid(
                 state = fadeGrid,
                 columns = GridCells.Fixed(2),
-                modifier = Modifier.fillMaxSize().topFade(fadeGrid),
-                contentPadding = barPadding(extra = 12.dp, horizontal = 12.dp, top = 12.dp),
+                modifier = Modifier.actionRowListInset().fillMaxSize().topFade(fadeGrid, TabFadeHeight),
+                contentPadding = barPadding(extra = 12.dp, horizontal = 12.dp, top = actionRowContentTop(8.dp)),
                 horizontalArrangement = Arrangement.spacedBy(12.dp),
                 verticalArrangement = Arrangement.spacedBy(12.dp),
             ) {
@@ -687,8 +791,7 @@ private fun GenresTab(viewModel: LibraryViewModel, nav: NavState) {
                 }
             }
         } else {
-            val fadeList = rememberLazyListState()
-            LazyColumn(Modifier.fillMaxSize().topFade(fadeList), state = fadeList, contentPadding = barPadding(extra = 8.dp)) {
+            LazyColumn(Modifier.actionRowListInset().fillMaxSize().topFade(fadeList, TabFadeHeight), state = fadeList, contentPadding = barPadding(extra = 8.dp, top = actionRowContentTop())) {
                 items(list, key = { it.key }) { genre ->
                     TextRow(
                         title = genre.name ?: unknown,
@@ -740,28 +843,32 @@ private fun GenreCard(genre: GenreItem, unknown: String, onClick: () -> Unit) {
 private fun PlaylistsTab(viewModel: LibraryViewModel, nav: NavState) {
     val playlists by viewModel.playlists.collectAsStateWithLifecycle()
     var creating by remember { mutableStateOf(false) }
-    var gridMode by rememberSaveable { mutableStateOf(true) }
+    var gridMode by rememberSaveable { mutableStateOf(viewModel.settings.gridMode("playlists", true)) }
     var sortIndex by rememberSaveable { mutableIntStateOf(0) }
     val raw = playlists ?: return
     val list = remember(raw, sortIndex) { LibrarySorting.playlists(raw, NameCountSort.entries[sortIndex]) }
     val labels = listOf(stringResource(R.string.sort_name), stringResource(R.string.sort_song_count))
 
-    Column(Modifier.fillMaxSize()) {
+    val fadeGrid = rememberLazyGridState()
+    val fadeList = rememberLazyListState()
+    val rowProgress = rememberActionRowProgress { if (gridMode) fadeGrid.scrollEstimate() else fadeList.scrollEstimate() }
+    Box(Modifier.fillMaxSize()) {
         LibraryActionRow(
+            modifier = Modifier.zIndex(1f),
+            progress = rowProgress,
             onShuffle = {
                 viewModel.shufflePlaylists(list.map { it.id })
             },
             viewMode = if (gridMode) ViewMode.GRID else ViewMode.LIST,
-            onToggleView = { gridMode = !gridMode },
+            onToggleView = { gridMode = !gridMode; viewModel.settings.setGridMode("playlists", gridMode) },
             sortOptions = labels.mapIndexed { i, l -> SortOption(l, i == sortIndex) { sortIndex = i } },
         )
         if (gridMode) {
-            val fadeGrid = rememberLazyGridState()
             LazyVerticalGrid(
                 state = fadeGrid,
                 columns = GridCells.Fixed(2),
-                modifier = Modifier.fillMaxSize().topFade(fadeGrid),
-                contentPadding = barPadding(extra = 12.dp, horizontal = 12.dp, top = 12.dp),
+                modifier = Modifier.actionRowListInset().fillMaxSize().topFade(fadeGrid, TabFadeHeight),
+                contentPadding = barPadding(extra = 12.dp, horizontal = 12.dp, top = actionRowContentTop(8.dp)),
                 horizontalArrangement = Arrangement.spacedBy(12.dp),
                 verticalArrangement = Arrangement.spacedBy(12.dp),
             ) {
@@ -771,8 +878,7 @@ private fun PlaylistsTab(viewModel: LibraryViewModel, nav: NavState) {
                 }
             }
         } else {
-            val fadeList = rememberLazyListState()
-            LazyColumn(Modifier.fillMaxSize().topFade(fadeList), state = fadeList, contentPadding = barPadding(extra = 8.dp)) {
+            LazyColumn(Modifier.actionRowListInset().fillMaxSize().topFade(fadeList, TabFadeHeight), state = fadeList, contentPadding = barPadding(extra = 8.dp, top = actionRowContentTop())) {
                 item(key = "new-playlist") {
                     TextRow(
                         title = stringResource(R.string.new_playlist),
@@ -794,7 +900,20 @@ private fun PlaylistsTab(viewModel: LibraryViewModel, nav: NavState) {
             }
         }
     }
-    if (creating) NewPlaylistFlow(viewModel, onDismiss = { creating = false })
+    if (creating) {
+        NewPlaylistFlow(
+            viewModel,
+            onDismiss = { creating = false },
+            onOpenDownload = {
+                creating = false
+                nav.push(Screen.SettingsDownload)
+            },
+            onOpenSpotify = {
+                creating = false
+                nav.push(Screen.SettingsSpotify)
+            },
+        )
+    }
 }
 
 @Composable
@@ -860,40 +979,61 @@ fun ScanBanner(scan: ScanState) {
                 text = stringResource(R.string.scanning_tags, scan.processed, scan.toProcess),
                 style = MaterialTheme.typography.bodySmall,
             )
-            LinearProgressIndicator(
-                progress = { scan.processed.toFloat() / scan.toProcess },
-                modifier = Modifier.fillMaxWidth(),
-            )
+com.localplayer.music.ui.components.ChunkyProgress(scan.processed.toFloat() / scan.toProcess, thickness = 8.dp)
         } else {
             Text(
-                text = stringResource(R.string.scanning_device, scan.discovered),
+                text = pluralStringResource(R.plurals.scanning_device, scan.discovered, scan.discovered),
                 style = MaterialTheme.typography.bodySmall,
             )
-            LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
+com.localplayer.music.ui.components.ChunkyProgress(null, thickness = 8.dp)
         }
     }
 }
 
 /** Shown when the last scan failed: says what happened, that the library is intact, and lets the user retry. */
 @Composable
-fun ScanErrorBanner(scan: ScanState, onRetry: () -> Unit) {
+fun ScanErrorBanner(
+    scan: ScanState,
+    onRetry: () -> Unit,
+    onRemoveFolder: (String) -> Unit,
+    onRelinkFolder: (String, android.net.Uri) -> Unit,
+) {
     val error = scan.error ?: return
+    val failedTree = error.treeUri
+    val repick = androidx.activity.compose.rememberLauncherForActivityResult(
+        androidx.activity.result.contract.ActivityResultContracts.OpenDocumentTree(),
+    ) { picked -> if (picked != null && failedTree != null) onRelinkFolder(failedTree, picked) }
     Row(
         modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        Text(
-            text = stringResource(
-                if (error.kind == com.localplayer.music.data.library.ScanFailureKind.QUERY_FAILED) {
-                    R.string.scan_failed_query
-                } else {
-                    R.string.scan_failed_unexpected
+        Column(Modifier.weight(1f)) {
+            Text(
+                text = when (error.kind) {
+                    ScanFailureKind.QUERY_FAILED -> stringResource(R.string.scan_failed_query)
+                    ScanFailureKind.FOLDER_FAILED -> stringResource(R.string.scan_failed_folder, error.detail.orEmpty())
+                    else -> stringResource(R.string.scan_failed_unexpected)
                 },
-            ),
-            style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.error,
-            modifier = Modifier.weight(1f),
-        )
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.error,
+            )
+            // The system's own reason (for example a missing permission), so the cause can be found.
+            if (error.kind != ScanFailureKind.FOLDER_FAILED) error.detail?.takeIf { it.isNotBlank() }?.let {
+                Text(it, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+            // A folder that can no longer be read: one tap removes it from the library (the files are never touched).
+            error.treeUri?.let { uri ->
+                Row(horizontalArrangement = androidx.compose.foundation.layout.Arrangement.spacedBy(8.dp)) {
+                    androidx.compose.material3.FilledTonalButton(
+                        onClick = { repick.launch(null) },
+                        colors = com.localplayer.music.ui.theme.tonalButtonColors(),
+                    ) { Text(stringResource(R.string.scan_relink_folder), maxLines = 1) }
+                    androidx.compose.material3.TextButton(onClick = { onRemoveFolder(uri) }) {
+                        Text(stringResource(R.string.scan_remove_folder_short), maxLines = 1)
+                    }
+                }
+            }
+        }
         androidx.compose.material3.TextButton(onClick = onRetry) { Text(stringResource(R.string.scan_retry)) }
     }
 }

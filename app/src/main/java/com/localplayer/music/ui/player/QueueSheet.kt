@@ -24,12 +24,9 @@ import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
-import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.asPaddingValues
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material3.DropdownMenu
-import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.IconButtonDefaults
@@ -83,7 +80,6 @@ import com.localplayer.music.ui.theme.pressScale
 import com.localplayer.music.ui.theme.rememberHaptics
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.distinctUntilChanged
-import kotlinx.coroutines.flow.drop
 
 private val SheetShape = RoundedCornerShape(topStart = 28.dp, topEnd = 28.dp)
 
@@ -331,21 +327,21 @@ private fun QueueToolbar(viewModel: LibraryViewModel, actions: QueueActions) {
                 active = false,
                 onClick = { haptics.tick(); menuOpen = true },
             )
-            DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
-                DropdownMenuItem(
-                    text = { Text(stringResource(R.string.queue_clear_upcoming)) },
-                    onClick = {
-                        menuOpen = false
-                        actions.clearUpcoming()
-                    },
-                )
-                DropdownMenuItem(
-                    text = { Text(stringResource(R.string.clear_queue)) },
-                    onClick = {
-                        menuOpen = false
-                        actions.clearQueue()
-                    },
-                )
+            com.localplayer.music.ui.components.AppDropdownMenu(expanded = menuOpen, onDismiss = { menuOpen = false }) {
+                com.localplayer.music.ui.components.AppMenuItem(
+                    com.localplayer.music.ui.components.AppIcons.Close,
+                    stringResource(R.string.queue_clear_upcoming),
+                ) {
+                    menuOpen = false
+                    actions.clearUpcoming()
+                }
+                com.localplayer.music.ui.components.AppMenuItem(
+                    com.localplayer.music.ui.components.AppIcons.Delete,
+                    stringResource(R.string.clear_queue),
+                ) {
+                    menuOpen = false
+                    actions.clearQueue()
+                }
             }
         }
     }

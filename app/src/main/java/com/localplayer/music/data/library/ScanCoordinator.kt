@@ -23,8 +23,8 @@ class ScanCoordinator {
     }
 
     /** Records that the current pass failed. The existing index is not touched by this call. */
-    fun fail(kind: ScanFailureKind, detail: String? = null) {
-        _state.update { it.copy(error = ScanError(kind, detail)) }
+    fun fail(kind: ScanFailureKind, detail: String? = null, treeUri: String? = null) {
+        _state.update { it.copy(error = ScanError(kind, detail, treeUri)) }
     }
 
     /** Runs [pass]. If a scan is already running, it is repeated once when that one finishes. */

@@ -1,5 +1,7 @@
 package com.localplayer.music.data
 
+import androidx.core.content.edit
+import com.localplayer.music.data.artwork.ArtworkBlur
 import android.content.Context
 import android.os.Build
 import com.localplayer.music.data.effects.EqModel
@@ -7,6 +9,9 @@ import com.localplayer.music.data.effects.EqPreset
 import com.localplayer.music.data.effects.ReplayGainMode
 import com.localplayer.music.data.mix.MixRefresh
 import com.localplayer.music.data.mix.MixSettings
+import com.localplayer.music.data.personalization.ActionRowSide
+import com.localplayer.music.data.personalization.ActionRowStyle
+import com.localplayer.music.data.personalization.BackButtonSide
 import com.localplayer.music.data.personalization.ControlColors
 import com.localplayer.music.data.personalization.FontChoices
 import com.localplayer.music.data.personalization.LyricsAlignment
@@ -29,7 +34,7 @@ class AppSettings(context: Context) {
 
     fun setUseMediaStoreScanner(enabled: Boolean) {
         val value = enabled && mediaStoreScannerSupported()
-        prefs.edit().putBoolean(KEY_MEDIASTORE, value).apply()
+        prefs.edit { putBoolean(KEY_MEDIASTORE, value) }
         _useMediaStoreScanner.value = value
     }
 
@@ -40,7 +45,7 @@ class AppSettings(context: Context) {
     val themeMode: StateFlow<ThemeMode> = _themeMode.asStateFlow()
 
     fun setThemeMode(mode: ThemeMode) {
-        prefs.edit().putString(KEY_THEME, mode.name).apply()
+        prefs.edit { putString(KEY_THEME, mode.name) }
         _themeMode.value = mode
     }
 
@@ -48,17 +53,59 @@ class AppSettings(context: Context) {
     val dynamicColor: StateFlow<Boolean> = _dynamicColor.asStateFlow()
 
     fun setDynamicColor(enabled: Boolean) {
-        prefs.edit().putBoolean(KEY_DYNAMIC, enabled).apply()
+        prefs.edit { putBoolean(KEY_DYNAMIC, enabled) }
         _dynamicColor.value = enabled
     }
 
-    private val _artworkColors = MutableStateFlow(prefs.getBoolean(KEY_ARTWORK_COLORS, true))
-    /** Derive player colors from the current album artwork. */
+    // Nobody has chosen a background style yet (new install, or never touched): the blurred cover is the default.
+    private val styleNeverChosen = !prefs.contains(KEY_ARTWORK_COLORS) && !prefs.contains(KEY_ARTWORK_BLUR)
+
+    private val _artworkColors = MutableStateFlow(prefs.getBoolean(KEY_ARTWORK_COLORS, false))
+    /** Derive player colors from the current album artwork (off by default; the blurred cover is the default). */
     val artworkColors: StateFlow<Boolean> = _artworkColors.asStateFlow()
 
+    /** Colours of the cover and the blurred cover exclude each other: switching one on switches the other off. */
     fun setArtworkColors(enabled: Boolean) {
-        prefs.edit().putBoolean(KEY_ARTWORK_COLORS, enabled).apply()
+        prefs.edit { putBoolean(KEY_ARTWORK_COLORS, enabled) }
         _artworkColors.value = enabled
+        if (enabled) setArtworkBlur(false)
+    }
+
+    private val _artworkBlur = MutableStateFlow(prefs.getBoolean(KEY_ARTWORK_BLUR, styleNeverChosen) && !_artworkColors.value)
+    /** The blurred cover as the background of Now Playing (on by default; when on, no colour is extracted at all). */
+    val artworkBlur: StateFlow<Boolean> = _artworkBlur.asStateFlow()
+
+    fun setArtworkBlur(enabled: Boolean) {
+        if (_artworkBlur.value != enabled) {
+            prefs.edit { putBoolean(KEY_ARTWORK_BLUR, enabled) }
+            _artworkBlur.value = enabled
+        }
+        if (enabled && _artworkColors.value) {
+            prefs.edit { putBoolean(KEY_ARTWORK_COLORS, false) }
+            _artworkColors.value = false
+        }
+    }
+
+    private val _blurStrength = MutableStateFlow(clampBlurStrength(prefs.getInt(KEY_BLUR_STRENGTH, ArtworkBlur.DEFAULT_LEVEL)))
+    /** How much the blurred cover is blurred: [ArtworkBlur.MIN_LEVEL] (cover easy to recognise) .. [ArtworkBlur.MAX_LEVEL]. */
+    val blurStrength: StateFlow<Int> = _blurStrength.asStateFlow()
+
+    fun setBlurStrength(level: Int) {
+        val v = clampBlurStrength(level)
+        if (_blurStrength.value == v) return
+        prefs.edit { putInt(KEY_BLUR_STRENGTH, v) }
+        _blurStrength.value = v
+    }
+
+    private fun clampBlurStrength(level: Int) = level.coerceIn(ArtworkBlur.MIN_LEVEL, ArtworkBlur.MAX_LEVEL)
+
+    private val _blurEverywhere = MutableStateFlow(prefs.getBoolean(KEY_BLUR_EVERYWHERE, false))
+    /** With the blurred cover on: also use it behind the rest of the app (off = only Now Playing). */
+    val blurEverywhere: StateFlow<Boolean> = _blurEverywhere.asStateFlow()
+
+    fun setBlurEverywhere(enabled: Boolean) {
+        prefs.edit { putBoolean(KEY_BLUR_EVERYWHERE, enabled) }
+        _blurEverywhere.value = enabled
     }
 
     private val _backgroundVersion = MutableStateFlow(prefs.getLong(KEY_BACKGROUND, 0L))
@@ -66,7 +113,7 @@ class AppSettings(context: Context) {
     val backgroundVersion: StateFlow<Long> = _backgroundVersion.asStateFlow()
 
     fun setBackgroundVersion(version: Long) {
-        prefs.edit().putLong(KEY_BACKGROUND, version).apply()
+        prefs.edit { putLong(KEY_BACKGROUND, version) }
         _backgroundVersion.value = version
     }
 
@@ -76,7 +123,7 @@ class AppSettings(context: Context) {
 
     fun setBackgroundDim(value: Float) {
         val v = clampDim(value)
-        prefs.edit().putFloat(KEY_BACKGROUND_DIM, v).apply()
+        prefs.edit { putFloat(KEY_BACKGROUND_DIM, v) }
         _backgroundDim.value = v
     }
 
@@ -85,7 +132,7 @@ class AppSettings(context: Context) {
     val language: StateFlow<AppLanguage> = _language.asStateFlow()
 
     fun setLanguage(language: AppLanguage) {
-        prefs.edit().putString(KEY_LANGUAGE, language.tag).apply()
+        prefs.edit { putString(KEY_LANGUAGE, language.tag) }
         _language.value = language
     }
 
@@ -94,7 +141,7 @@ class AppSettings(context: Context) {
     val tabOrder: StateFlow<String?> = _tabOrder.asStateFlow()
 
     fun setTabOrder(raw: String?) {
-        prefs.edit().apply { if (raw == null) remove(KEY_TAB_ORDER) else putString(KEY_TAB_ORDER, raw) }.apply()
+        prefs.edit { if (raw == null) remove(KEY_TAB_ORDER) else putString(KEY_TAB_ORDER, raw) }
         _tabOrder.value = raw
     }
 
@@ -103,7 +150,7 @@ class AppSettings(context: Context) {
     val controlColors: StateFlow<ControlColors> = _controlColors.asStateFlow()
 
     fun setControlColors(colors: ControlColors) {
-        prefs.edit().apply { colors.serialize()?.let { putString(KEY_CONTROL_COLORS, it) } ?: remove(KEY_CONTROL_COLORS) }.apply()
+        prefs.edit { colors.serialize()?.let { putString(KEY_CONTROL_COLORS, it) } ?: remove(KEY_CONTROL_COLORS) }
         _controlColors.value = colors
     }
 
@@ -112,7 +159,7 @@ class AppSettings(context: Context) {
     val fontChoices: StateFlow<FontChoices> = _fontChoices.asStateFlow()
 
     fun setFontChoices(choices: FontChoices) {
-        prefs.edit().apply { choices.serialize()?.let { putString(KEY_FONT_CHOICES, it) } ?: remove(KEY_FONT_CHOICES) }.apply()
+        prefs.edit { choices.serialize()?.let { putString(KEY_FONT_CHOICES, it) } ?: remove(KEY_FONT_CHOICES) }
         _fontChoices.value = choices
     }
 
@@ -121,7 +168,7 @@ class AppSettings(context: Context) {
     val customFontVersion: StateFlow<Long> = _customFontVersion.asStateFlow()
 
     fun setCustomFontVersion(version: Long) {
-        prefs.edit().putLong(KEY_CUSTOM_FONT, version).apply()
+        prefs.edit { putLong(KEY_CUSTOM_FONT, version) }
         _customFontVersion.value = version
     }
 
@@ -130,7 +177,7 @@ class AppSettings(context: Context) {
     val pureMode: StateFlow<PureMode> = _pureMode.asStateFlow()
 
     fun setPureMode(mode: PureMode) {
-        prefs.edit().putString(KEY_PURE_MODE, mode.key).apply()
+        prefs.edit { putString(KEY_PURE_MODE, mode.key) }
         _pureMode.value = mode
     }
 
@@ -138,7 +185,7 @@ class AppSettings(context: Context) {
     val lyricsAlignment: StateFlow<LyricsAlignment> = _lyricsAlignment.asStateFlow()
 
     fun setLyricsAlignment(value: LyricsAlignment) {
-        prefs.edit().putString(KEY_LYRICS_ALIGNMENT, value.key).apply()
+        prefs.edit { putString(KEY_LYRICS_ALIGNMENT, value.key) }
         _lyricsAlignment.value = value
     }
 
@@ -147,7 +194,7 @@ class AppSettings(context: Context) {
     val yourMixCardDismissed: StateFlow<Boolean> = _yourMixCardDismissed.asStateFlow()
 
     fun setYourMixCardDismissed(value: Boolean) {
-        prefs.edit().putBoolean(KEY_YOUR_MIX_DISMISSED, value).apply()
+        prefs.edit { putBoolean(KEY_YOUR_MIX_DISMISSED, value) }
         _yourMixCardDismissed.value = value
     }
 
@@ -157,7 +204,7 @@ class AppSettings(context: Context) {
 
     fun setMixSettings(value: MixSettings) {
         val v = value.normalized()
-        prefs.edit().putString(KEY_MIX_SETTINGS, v.serialize()).apply()
+        prefs.edit { putString(KEY_MIX_SETTINGS, v.serialize()) }
         _mixSettings.value = v
     }
 
@@ -165,25 +212,190 @@ class AppSettings(context: Context) {
     var mixSnapshot: MixRefresh.Snapshot?
         get() = MixRefresh.Snapshot.parse(prefs.getString(KEY_MIX_SNAPSHOT, null))
         set(value) {
-            prefs.edit().apply { if (value == null) remove(KEY_MIX_SNAPSHOT) else putString(KEY_MIX_SNAPSHOT, value.serialize()) }.apply()
+            prefs.edit { if (value == null) remove(KEY_MIX_SNAPSHOT) else putString(KEY_MIX_SNAPSHOT, value.serialize()) }
         }
 
-    private val _autoUpdateCheck = MutableStateFlow(prefs.getBoolean(KEY_AUTO_UPDATE, true))
-    /** Check GitHub Releases for a newer version at most once a day after the app opens. */
+    private val _autoUpdateCheck = MutableStateFlow(prefs.getBoolean(KEY_AUTO_UPDATE, false))
+    /** Check GitHub Releases for a newer version at most once a week, 15 s after the app opens. Off by default. */
     val autoUpdateCheck: StateFlow<Boolean> = _autoUpdateCheck.asStateFlow()
 
     fun setAutoUpdateCheck(value: Boolean) {
-        prefs.edit().putBoolean(KEY_AUTO_UPDATE, value).apply()
+        prefs.edit { putBoolean(KEY_AUTO_UPDATE, value) }
         _autoUpdateCheck.value = value
     }
+
+    private val _includeBetaUpdates = MutableStateFlow(prefs.getBoolean(KEY_BETA_UPDATES, false))
+    /** Also offer GitHub pre-releases (betas) when checking for updates. Off by default. */
+    val includeBetaUpdates: StateFlow<Boolean> = _includeBetaUpdates.asStateFlow()
+
+    fun setIncludeBetaUpdates(value: Boolean) {
+        prefs.edit { putBoolean(KEY_BETA_UPDATES, value) }
+        _includeBetaUpdates.value = value
+    }
+
+    // ---- playback and lyrics options of 1.6 (per device, not part of a settings backup) ----
+
+    private val _restoreQueue = MutableStateFlow(prefs.getBoolean(KEY_RESTORE_QUEUE, true))
+    /** Put the queue and the position back after the app was closed. ON by default (it always worked this way). */
+    val restoreQueue: StateFlow<Boolean> = _restoreQueue.asStateFlow()
+
+    fun setRestoreQueue(value: Boolean) {
+        prefs.edit { putBoolean(KEY_RESTORE_QUEUE, value) }
+        _restoreQueue.value = value
+    }
+
+    private val _keepPlayerAfterClose = MutableStateFlow(prefs.getBoolean(KEY_KEEP_AFTER_CLOSE, false))
+    /**
+     * Swiping the app away from Recent apps keeps the player service: a song that plays keeps playing with its notification,
+     * a paused one stays as a dimmed (stopped) player card that Play brings back. OFF by default: closing the app stops everything.
+     */
+    val keepPlayerAfterClose: StateFlow<Boolean> = _keepPlayerAfterClose.asStateFlow()
+
+    fun setKeepPlayerAfterClose(value: Boolean) {
+        prefs.edit { putBoolean(KEY_KEEP_AFTER_CLOSE, value) }
+        _keepPlayerAfterClose.value = value
+    }
+
+    private val _fadeBetweenSongs = MutableStateFlow(prefs.getBoolean(KEY_FADE, false))
+    /** Fade out at the end of a song and fade in the next one. Off by default. */
+    val fadeBetweenSongs: StateFlow<Boolean> = _fadeBetweenSongs.asStateFlow()
+
+    fun setFadeBetweenSongs(value: Boolean) {
+        prefs.edit { putBoolean(KEY_FADE, value) }
+        _fadeBetweenSongs.value = value
+    }
+
+    private val _fadeSeconds = MutableStateFlow(com.localplayer.music.playback.FadeMath.clampSeconds(
+        prefs.getInt(KEY_FADE_SECONDS, com.localplayer.music.playback.FadeMath.DEFAULT_SECONDS),
+    ))
+    val fadeSeconds: StateFlow<Int> = _fadeSeconds.asStateFlow()
+
+    fun setFadeSeconds(value: Int) {
+        val v = com.localplayer.music.playback.FadeMath.clampSeconds(value)
+        prefs.edit { putInt(KEY_FADE_SECONDS, v) }
+        _fadeSeconds.value = v
+    }
+
+    private val _lyricsInPlayer = MutableStateFlow(prefs.getBoolean(KEY_LYRICS_IN_PLAYER, false))
+    /** Show the current lyric line above the progress bar in Now Playing (synchronized lyrics only). Off by default. */
+    val lyricsInPlayer: StateFlow<Boolean> = _lyricsInPlayer.asStateFlow()
+
+    fun setLyricsInPlayer(value: Boolean) {
+        prefs.edit { putBoolean(KEY_LYRICS_IN_PLAYER, value) }
+        _lyricsInPlayer.value = value
+    }
+
+    private val _hideFileInfoChip = MutableStateFlow(prefs.getBoolean(KEY_HIDE_FILE_INFO_CHIP, false))
+    /** Hide the "44.1 kHz . 224 kbps . MP3" capsule in Now Playing (the text then gets bigger). Off by default. */
+    val hideFileInfoChip: StateFlow<Boolean> = _hideFileInfoChip.asStateFlow()
+
+    fun setHideFileInfoChip(value: Boolean) {
+        prefs.edit { putBoolean(KEY_HIDE_FILE_INFO_CHIP, value) }
+        _hideFileInfoChip.value = value
+    }
+
+    private val _backButtonSide = MutableStateFlow(BackButtonSide.fromKey(prefs.getString(KEY_BACK_BUTTON_SIDE, null)))
+    /** Where the back button is (top bar, or floating above the mini player for one-handed use). Off by default. */
+    val backButtonSide: StateFlow<BackButtonSide> = _backButtonSide.asStateFlow()
+
+    fun setBackButtonSide(value: BackButtonSide) {
+        prefs.edit { putString(KEY_BACK_BUTTON_SIDE, value.key) }
+        _backButtonSide.value = value
+    }
+
+    private val _actionRowStyle = MutableStateFlow(ActionRowStyle.fromKey(prefs.getString(KEY_ACTION_ROW_STYLE, null)))
+    /** Look of the Shuffle row of the library tabs: a pill that follows the scrolling (default) or the classic fixed row. */
+    val actionRowStyle: StateFlow<ActionRowStyle> = _actionRowStyle.asStateFlow()
+
+    fun setActionRowStyle(value: ActionRowStyle) {
+        prefs.edit { putString(KEY_ACTION_ROW_STYLE, value.key) }
+        _actionRowStyle.value = value
+    }
+
+    private val _actionRowSide = MutableStateFlow(ActionRowSide.fromKey(prefs.getString(KEY_ACTION_ROW_SIDE, null)))
+    /** Which side the pill packs to (own choice, not tied to the back button setting). */
+    val actionRowSide: StateFlow<ActionRowSide> = _actionRowSide.asStateFlow()
+
+    fun setActionRowSide(value: ActionRowSide) {
+        prefs.edit { putString(KEY_ACTION_ROW_SIDE, value.key) }
+        _actionRowSide.value = value
+    }
+
+    private val _lyricsFill = MutableStateFlow(prefs.getBoolean(KEY_LYRICS_FILL, false))
+    /** The active lyric line fills with colour across its length (an estimate from the line's duration). Off by default. */
+    val lyricsFill: StateFlow<Boolean> = _lyricsFill.asStateFlow()
+
+    fun setLyricsFill(value: Boolean) {
+        prefs.edit { putBoolean(KEY_LYRICS_FILL, value) }
+        _lyricsFill.value = value
+    }
+
+    // ---- automatic backups (opt-in, device-specific: deliberately NOT part of a settings backup) ----
+
+    private val _autoBackupEnabled = MutableStateFlow(prefs.getBoolean(KEY_AUTO_BACKUP, false))
+    /** Weekly complete backup into [autoBackupFolder], made a minute after the app opens. Off by default. */
+    val autoBackupEnabled: StateFlow<Boolean> = _autoBackupEnabled.asStateFlow()
+
+    fun setAutoBackupEnabled(value: Boolean) {
+        prefs.edit { putBoolean(KEY_AUTO_BACKUP, value) }
+        _autoBackupEnabled.value = value
+    }
+
+    private val _autoBackupFolder = MutableStateFlow(prefs.getString(KEY_AUTO_BACKUP_FOLDER, null))
+    /** Tree URI of the folder for automatic backups, or null. */
+    val autoBackupFolder: StateFlow<String?> = _autoBackupFolder.asStateFlow()
+
+    fun setAutoBackupFolder(uri: String?) {
+        prefs.edit { if (uri == null) remove(KEY_AUTO_BACKUP_FOLDER) else putString(KEY_AUTO_BACKUP_FOLDER, uri) }
+        _autoBackupFolder.value = uri
+    }
+
+    private val _androidBackupCopy = MutableStateFlow(prefs.getBoolean(KEY_ANDROID_COPY, false))
+    /** Keep a copy of the complete backup inside the app so Android's own (Google) backup carries it to a new phone. */
+    val androidBackupCopy: StateFlow<Boolean> = _androidBackupCopy.asStateFlow()
+
+    fun setAndroidBackupCopy(value: Boolean) {
+        prefs.edit { putBoolean(KEY_ANDROID_COPY, value) }
+        _androidBackupCopy.value = value
+    }
+
+    var lastAutoBackupAt: Long
+        get() = prefs.getLong(KEY_LAST_AUTO_BACKUP, 0L)
+        set(value) { prefs.edit { putLong(KEY_LAST_AUTO_BACKUP, value) } }
+
+    var lastAutoBackupTryAt: Long
+        get() = prefs.getLong(KEY_LAST_AUTO_BACKUP_TRY, 0L)
+        set(value) { prefs.edit { putLong(KEY_LAST_AUTO_BACKUP_TRY, value) } }
+
+    var lastAndroidCopyAt: Long
+        get() = prefs.getLong(KEY_LAST_ANDROID_COPY, 0L)
+        set(value) { prefs.edit { putLong(KEY_LAST_ANDROID_COPY, value) } }
+
+    var lastAndroidCopyTryAt: Long
+        get() = prefs.getLong(KEY_LAST_ANDROID_COPY_TRY, 0L)
+        set(value) { prefs.edit { putLong(KEY_LAST_ANDROID_COPY_TRY, value) } }
+
+    /** The "a restored backup copy was found" message is shown only once. */
+    var restoredCopyNoticed: Boolean
+        get() = prefs.getBoolean(KEY_RESTORED_NOTICED, false)
+        set(value) { prefs.edit { putBoolean(KEY_RESTORED_NOTICED, value) } }
 
     private val _swipeActions = MutableStateFlow(prefs.getBoolean(KEY_SWIPE_ACTIONS, true))
     /** Swipe left/right on a song row (queue end / play next). Off = the gesture does nothing at all. */
     val swipeActionsEnabled: StateFlow<Boolean> = _swipeActions.asStateFlow()
 
     fun setSwipeActionsEnabled(value: Boolean) {
-        prefs.edit().putBoolean(KEY_SWIPE_ACTIONS, value).apply()
+        prefs.edit { putBoolean(KEY_SWIPE_ACTIONS, value) }
         _swipeActions.value = value
+    }
+
+    private val _jamEnabled = MutableStateFlow(prefs.getBoolean(KEY_JAM, false))
+    /** Jam (listening together over the local network). Off until switched on in Settings > Jam. */
+    val jamEnabled: StateFlow<Boolean> = _jamEnabled.asStateFlow()
+
+    fun setJamEnabled(value: Boolean) {
+        prefs.edit { putBoolean(KEY_JAM, value) }
+        _jamEnabled.value = value
     }
 
     private val _queueButton = MutableStateFlow(prefs.getBoolean(KEY_QUEUE_BUTTON, false))
@@ -191,7 +403,7 @@ class AppSettings(context: Context) {
     val queueButtonEnabled: StateFlow<Boolean> = _queueButton.asStateFlow()
 
     fun setQueueButtonEnabled(value: Boolean) {
-        prefs.edit().putBoolean(KEY_QUEUE_BUTTON, value).apply()
+        prefs.edit { putBoolean(KEY_QUEUE_BUTTON, value) }
         _queueButton.value = value
     }
 
@@ -200,18 +412,28 @@ class AppSettings(context: Context) {
     val downloadFolder: StateFlow<String?> = _downloadFolder.asStateFlow()
 
     fun setDownloadFolder(uri: String?) {
-        prefs.edit().apply { if (uri == null) remove(KEY_DOWNLOAD_FOLDER) else putString(KEY_DOWNLOAD_FOLDER, uri) }.apply()
+        prefs.edit { if (uri == null) remove(KEY_DOWNLOAD_FOLDER) else putString(KEY_DOWNLOAD_FOLDER, uri) }
         _downloadFolder.value = uri
     }
 
     var lastUpdateCheckAt: Long
         get() = prefs.getLong(KEY_LAST_UPDATE_CHECK, 0L)
-        set(value) { prefs.edit().putLong(KEY_LAST_UPDATE_CHECK, value).apply() }
+        set(value) { prefs.edit { putLong(KEY_LAST_UPDATE_CHECK, value) } }
 
     /** The newest version an automatic check found (empty = none), shown in About. */
+    private val _knownNewer = MutableStateFlow(prefs.getString(KEY_KNOWN_NEWER, "").orEmpty())
+    /** Observable form of [knownNewerVersion] (drives the red dot on the Settings button). */
+    val knownNewer: StateFlow<String> = _knownNewer.asStateFlow()
     var knownNewerVersion: String
-        get() = prefs.getString(KEY_KNOWN_NEWER, "").orEmpty()
-        set(value) { prefs.edit().putString(KEY_KNOWN_NEWER, value).apply() }
+        get() = _knownNewer.value
+        set(value) {
+            prefs.edit { putString(KEY_KNOWN_NEWER, value) }
+            _knownNewer.value = value
+        }
+
+    /** Grid (true) or list (false) of a library tab, remembered per device. [tab] is a short id like "songs". */
+    fun gridMode(tab: String, default: Boolean): Boolean = prefs.getBoolean(KEY_GRID_PREFIX + tab, default)
+    fun setGridMode(tab: String, grid: Boolean) { prefs.edit { putBoolean(KEY_GRID_PREFIX + tab, grid) } }
 
     // --- optional features: ALL default to OFF and do nothing until the user switches them on -------------------
 
@@ -219,7 +441,7 @@ class AppSettings(context: Context) {
     /** Master switch of the home-screen widgets. Off = widgets show an inactive state and receive no updates. */
     val widgetsEnabled: StateFlow<Boolean> = _widgetsEnabled.asStateFlow()
     fun setWidgetsEnabled(value: Boolean) {
-        prefs.edit().putBoolean(KEY_WIDGETS, value).apply()
+        prefs.edit { putBoolean(KEY_WIDGETS, value) }
         _widgetsEnabled.value = value
     }
     /** Synchronous read for widget callbacks that run before any flow is observed. */
@@ -228,35 +450,35 @@ class AppSettings(context: Context) {
     private val _replayGainEnabled = MutableStateFlow(prefs.getBoolean(KEY_RG, false))
     val replayGainEnabled: StateFlow<Boolean> = _replayGainEnabled.asStateFlow()
     fun setReplayGainEnabled(value: Boolean) {
-        prefs.edit().putBoolean(KEY_RG, value).apply()
+        prefs.edit { putBoolean(KEY_RG, value) }
         _replayGainEnabled.value = value
     }
 
     private val _replayGainMode = MutableStateFlow(ReplayGainMode.fromKey(prefs.getString(KEY_RG_MODE, null)))
     val replayGainMode: StateFlow<ReplayGainMode> = _replayGainMode.asStateFlow()
     fun setReplayGainMode(value: ReplayGainMode) {
-        prefs.edit().putString(KEY_RG_MODE, value.key).apply()
+        prefs.edit { putString(KEY_RG_MODE, value.key) }
         _replayGainMode.value = value
     }
 
     private val _replayGainPreventClipping = MutableStateFlow(prefs.getBoolean(KEY_RG_CLIP, true))
     val replayGainPreventClipping: StateFlow<Boolean> = _replayGainPreventClipping.asStateFlow()
     fun setReplayGainPreventClipping(value: Boolean) {
-        prefs.edit().putBoolean(KEY_RG_CLIP, value).apply()
+        prefs.edit { putBoolean(KEY_RG_CLIP, value) }
         _replayGainPreventClipping.value = value
     }
 
     private val _equalizerEnabled = MutableStateFlow(prefs.getBoolean(KEY_EQ, false))
     val equalizerEnabled: StateFlow<Boolean> = _equalizerEnabled.asStateFlow()
     fun setEqualizerEnabled(value: Boolean) {
-        prefs.edit().putBoolean(KEY_EQ, value).apply()
+        prefs.edit { putBoolean(KEY_EQ, value) }
         _equalizerEnabled.value = value
     }
 
     private val _eqPreset = MutableStateFlow(EqPreset.fromKey(prefs.getString(KEY_EQ_PRESET, null)))
     val eqPreset: StateFlow<EqPreset> = _eqPreset.asStateFlow()
     fun setEqPreset(value: EqPreset) {
-        prefs.edit().putString(KEY_EQ_PRESET, value.key).apply()
+        prefs.edit { putString(KEY_EQ_PRESET, value.key) }
         _eqPreset.value = value
     }
 
@@ -265,7 +487,7 @@ class AppSettings(context: Context) {
     val eqCustom: StateFlow<FloatArray> = _eqCustom.asStateFlow()
     fun setEqCustom(gains: FloatArray) {
         val g = FloatArray(EqModel.BANDS) { EqModel.clamp(gains.getOrElse(it) { 0f }) }
-        prefs.edit().putString(KEY_EQ_CUSTOM, EqModel.serializeCustom(g)).apply()
+        prefs.edit { putString(KEY_EQ_CUSTOM, EqModel.serializeCustom(g)) }
         _eqCustom.value = g
     }
 
@@ -274,15 +496,36 @@ class AppSettings(context: Context) {
         private const val KEY_DOWNLOAD_FOLDER = "downloadFolder"
         private const val KEY_SWIPE_ACTIONS = "swipeActionsEnabled"
         private const val KEY_QUEUE_BUTTON = "queueButtonEnabled"
+        private const val KEY_JAM = "jamEnabled"
         private const val KEY_RG = "replayGainEnabled"
         private const val KEY_RG_MODE = "replayGainMode"
         private const val KEY_RG_CLIP = "replayGainPreventClipping"
         private const val KEY_EQ = "equalizerEnabled"
         private const val KEY_EQ_PRESET = "eqPreset"
         private const val KEY_EQ_CUSTOM = "eqCustom"
+        private const val KEY_RESTORE_QUEUE = "restoreQueue"
+        private const val KEY_FADE = "fadeBetweenSongs"
+        private const val KEY_FADE_SECONDS = "fadeSeconds"
+        private const val KEY_LYRICS_IN_PLAYER = "lyricsInPlayer"
+        private const val KEY_KEEP_AFTER_CLOSE = "keepPlayerAfterClose"
+        private const val KEY_HIDE_FILE_INFO_CHIP = "hideFileInfoChip"
+        private const val KEY_LYRICS_FILL = "lyricsFill"
+        private const val KEY_BACK_BUTTON_SIDE = "backButtonSide"
+        private const val KEY_ACTION_ROW_STYLE = "actionRowStyle"
+        private const val KEY_ACTION_ROW_SIDE = "actionRowSide"
         private const val KEY_AUTO_UPDATE = "autoUpdateCheck"
+        private const val KEY_BETA_UPDATES = "includeBetaUpdates"
+        private const val KEY_AUTO_BACKUP = "autoBackupEnabled"
+        private const val KEY_AUTO_BACKUP_FOLDER = "autoBackupFolder"
+        private const val KEY_ANDROID_COPY = "androidBackupCopy"
+        private const val KEY_LAST_AUTO_BACKUP = "lastAutoBackupAt"
+        private const val KEY_LAST_AUTO_BACKUP_TRY = "lastAutoBackupTryAt"
+        private const val KEY_LAST_ANDROID_COPY = "lastAndroidCopyAt"
+        private const val KEY_LAST_ANDROID_COPY_TRY = "lastAndroidCopyTryAt"
+        private const val KEY_RESTORED_NOTICED = "restoredCopyNoticed"
         private const val KEY_LAST_UPDATE_CHECK = "lastUpdateCheckAt"
         private const val KEY_KNOWN_NEWER = "knownNewerVersion"
+        private const val KEY_GRID_PREFIX = "gridMode_"
         private const val KEY_MIX_SETTINGS = "mixSettings"
         private const val KEY_MIX_SNAPSHOT = "mixSnapshot"
         private const val KEY_PURE_MODE = "pureMode"
@@ -304,6 +547,9 @@ class AppSettings(context: Context) {
         private const val KEY_THEME = "themeMode"
         private const val KEY_DYNAMIC = "dynamicColor"
         private const val KEY_ARTWORK_COLORS = "artworkColors"
+        private const val KEY_ARTWORK_BLUR = "artworkBlur"
+        private const val KEY_BLUR_EVERYWHERE = "blurEverywhere"
+        private const val KEY_BLUR_STRENGTH = "blurStrength"
         private const val KEY_BACKGROUND = "backgroundVersion"
         private const val KEY_BACKGROUND_DIM = "backgroundDim"
     }

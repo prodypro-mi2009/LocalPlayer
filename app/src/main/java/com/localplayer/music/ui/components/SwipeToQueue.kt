@@ -5,7 +5,6 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.SwipeToDismissBox
@@ -44,7 +43,6 @@ val LocalRowGestures = androidx.compose.runtime.compositionLocalOf { RowGestures
  * The content layer is TRANSPARENT (an opaque layer behind each row once hid the user's custom background as a
  * black block), and the action hint is only drawn while the row is actually being dragged.
  */
-@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun SwipeToQueue(
     onSwipeToEnd: (() -> Unit)?,

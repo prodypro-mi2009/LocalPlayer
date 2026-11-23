@@ -1,5 +1,6 @@
 package com.localplayer.music.data.metadata
 
+import com.localplayer.music.util.toLowerHex
 import org.jaudiotagger.audio.AudioFile
 import org.jaudiotagger.audio.AudioFileIO
 import org.jaudiotagger.audio.exceptions.CannotReadException
@@ -10,6 +11,11 @@ import org.jaudiotagger.tag.FieldKey
 import org.jaudiotagger.tag.Tag
 import org.jaudiotagger.tag.TagException
 import org.jaudiotagger.tag.TagOptionSingleton
+import org.jaudiotagger.tag.flac.FlacTag
+import org.jaudiotagger.tag.id3.AbstractID3v2Frame
+import org.jaudiotagger.tag.id3.AbstractID3v2Tag
+import org.jaudiotagger.tag.id3.framebody.FrameBodyTXXX
+import org.jaudiotagger.tag.vorbiscomment.VorbisCommentTagField
 import org.jaudiotagger.tag.images.ArtworkFactory
 import org.jaudiotagger.tag.reference.PictureTypes
 import java.io.File
@@ -58,8 +64,13 @@ object FileTagEngine {
         if (tag == null) {
             return TrackMetadata(container = container, durationMs = durationMs)
         }
+        val gain = com.localplayer.music.data.effects.ReplayGainReader.read(file, container.workingExtension)
         return TrackMetadata(
             container = container,
+            replayGainTrack = gain.trackGainDb?.let { MetadataValidation.canonicalGain(it.toString()) },
+            replayGainAlbum = gain.albumGainDb?.let { MetadataValidation.canonicalGain(it.toString()) },
+            replayGainTrackPeak = gain.trackPeak?.let { MetadataValidation.canonicalPeak(it.toString()) },
+            replayGainAlbumPeak = gain.albumPeak?.let { MetadataValidation.canonicalPeak(it.toString()) },
             title = text(tag, FieldKey.TITLE),
             artist = text(tag, FieldKey.ARTIST),
             album = text(tag, FieldKey.ALBUM),
@@ -186,6 +197,7 @@ object FileTagEngine {
     }
 
     private fun applyChange(tag: Tag, field: MetadataField, value: String?) {
+        if (field in MetadataField.gainFields) return applyGain(tag, field, value)
         val key = fieldKey(field)
         if (value == null) {
             try {
@@ -217,6 +229,48 @@ object FileTagEngine {
         }
     }
 
+    /** ReplayGain lives in a TXXX frame (MP3) or a Vorbis comment (FLAC). Other peak / album values stay untouched. */
+    private fun applyGain(tag: Tag, field: MetadataField, value: String?) {
+        val name = when (field) {
+            MetadataField.REPLAYGAIN_TRACK -> "REPLAYGAIN_TRACK_GAIN"
+            MetadataField.REPLAYGAIN_ALBUM -> "REPLAYGAIN_ALBUM_GAIN"
+            MetadataField.REPLAYGAIN_TRACK_PEAK -> "REPLAYGAIN_TRACK_PEAK"
+            else -> "REPLAYGAIN_ALBUM_PEAK"
+        }
+        // Gain is written as "-6.50 dB"; a peak is a plain number.
+        val text = value?.let { if (field in MetadataField.peakFields) it else "$it dB" }
+        try {
+            when (tag) {
+                is AbstractID3v2Tag -> {
+                    val frames = tag.getFields("TXXX").filterIsInstance<AbstractID3v2Frame>()
+                        .filter { (it.body as? FrameBodyTXXX)?.description.equals(name, ignoreCase = true) }
+                    if (frames.isNotEmpty()) {
+                        // Changed in place (an emptied value leaves an empty frame, which reads as "no gain").
+                        frames.forEach { (it.body as FrameBodyTXXX).text = text.orEmpty() }
+                    } else if (text != null) {
+                        val body = FrameBodyTXXX()
+                        body.description = name
+                        body.text = text
+                        val frame = tag.createFrame("TXXX")
+                        frame.body = body
+                        tag.setField(frame)
+                    }
+                }
+                is FlacTag -> {
+                    val vorbis = tag.vorbisCommentTag
+                    vorbis.deleteField(name)
+                    vorbis.deleteField(name.lowercase())
+                    if (text != null) vorbis.setField(VorbisCommentTagField(name, text))
+                }
+                else -> throw unsupportedField(field, IllegalStateException("ReplayGain is not supported here"))
+            }
+        } catch (e: RuntimeException) {
+            throw unsupportedField(field, e)
+        } catch (e: TagException) {
+            throw unsupportedField(field, e)
+        }
+    }
+
     private fun applyArtwork(tag: Tag, change: ArtworkChange) {
         try {
             // Always remove first: a file can hold several pictures and the old front cover must not stay behind.
@@ -239,7 +293,7 @@ object FileTagEngine {
     }
 
     private fun sha256Hex(bytes: ByteArray): String =
-        java.security.MessageDigest.getInstance("SHA-256").digest(bytes).joinToString("") { "%02x".format(it) }
+        java.security.MessageDigest.getInstance("SHA-256").digest(bytes).toLowerHex()
 
     private fun fieldKey(field: MetadataField): FieldKey = when (field) {
         MetadataField.TITLE -> FieldKey.TITLE
@@ -253,13 +307,15 @@ object FileTagEngine {
         MetadataField.COMPOSER -> FieldKey.COMPOSER
         MetadataField.COMMENT -> FieldKey.COMMENT
         MetadataField.LYRICS -> FieldKey.LYRICS
+        MetadataField.REPLAYGAIN_TRACK, MetadataField.REPLAYGAIN_ALBUM,
+        MetadataField.REPLAYGAIN_TRACK_PEAK, MetadataField.REPLAYGAIN_ALBUM_PEAK -> error("ReplayGain is handled by applyGain")
     }
 
     /** Exact fingerprint of each embedded picture: MIME type, picture type and SHA-256 of the bytes. */
     private fun artworkFingerprints(tag: Tag): List<String> = try {
         tag.artworkList.map { artwork ->
             val digest = java.security.MessageDigest.getInstance("SHA-256")
-            val hash = digest.digest(artwork.binaryData).joinToString("") { "%02x".format(it) }
+            val hash = digest.digest(artwork.binaryData).toLowerHex()
             "${artwork.mimeType}:${artwork.pictureType}:$hash"
         }
     } catch (e: Exception) {

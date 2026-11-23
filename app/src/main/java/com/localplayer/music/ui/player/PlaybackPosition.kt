@@ -6,9 +6,7 @@ import androidx.compose.runtime.MutableFloatState
 import androidx.compose.runtime.MutableLongState
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableLongStateOf
-import androidx.compose.ui.platform.LocalConfiguration
-import androidx.compose.ui.platform.LocalDensity
-import androidx.compose.ui.unit.dp
+import androidx.compose.ui.platform.LocalWindowInfo
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.lifecycle.Lifecycle
@@ -62,7 +60,7 @@ fun rememberSmoothFraction(
     val state = remember(resetKey) { mutableFloatStateOf(PlaybackProgress.fraction(positionMs(), durationMs)) }
     val lifecycleOwner = LocalLifecycleOwner.current
     // The screen width is an upper bound of the bar width, so the step is never longer than one pixel of travel.
-    val barWidthPx = with(LocalDensity.current) { LocalConfiguration.current.screenWidthDp.dp.roundToPx() }
+    val barWidthPx = LocalWindowInfo.current.containerSize.width.coerceAtLeast(1)
     LaunchedEffect(isPlaying, resetKey, durationMs, lifecycleOwner) {
         lifecycleOwner.lifecycle.repeatOnLifecycle(Lifecycle.State.STARTED) {
             state.floatValue = PlaybackProgress.fraction(currentPosition.value(), currentDuration.value)

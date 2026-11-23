@@ -38,14 +38,14 @@ class HistoryRecorder(
 
     override fun onMediaItemTransition(mediaItem: androidx.media3.common.MediaItem?, reason: Int) {
         handler.removeCallbacks(threshold)
-        currentUri = mediaItem?.localConfiguration?.uri?.toString()
+        currentUri = mediaItem?.takeIf { MediaItemFactory.addedBy(it) == null }?.localConfiguration?.uri?.toString()
         playedMs = 0L
         recorded = false
         if (player.isPlaying) startTimer()
     }
 
     override fun onIsPlayingChanged(isPlaying: Boolean) {
-        if (currentUri == null) currentUri = player.currentMediaItem?.localConfiguration?.uri?.toString()
+        if (currentUri == null) currentUri = player.currentMediaItem?.takeIf { MediaItemFactory.addedBy(it) == null }?.localConfiguration?.uri?.toString()
         if (isPlaying) startTimer() else pauseTimer()
     }
 

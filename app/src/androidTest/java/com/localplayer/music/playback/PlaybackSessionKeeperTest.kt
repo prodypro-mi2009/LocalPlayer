@@ -2,6 +2,7 @@ package com.localplayer.music.playback
 
 import android.os.Handler
 import android.os.Looper
+import androidx.media3.common.Player
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.exoplayer.source.ShuffleOrder
 import androidx.test.ext.junit.runners.AndroidJUnit4
@@ -13,6 +14,7 @@ import java.nio.file.Files
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.Executors
 import java.util.concurrent.TimeUnit
+import java.util.concurrent.atomic.AtomicBoolean
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
@@ -52,17 +54,62 @@ class PlaybackSessionKeeperTest {
         failure?.let { throw it }
     }
 
+    /** Like [scenario], but lets Media3 deliver its queued player events before the test finishes. */
+    private fun asyncScenario(block: (ExoPlayer, PlaybackSessionKeeper, SessionStoreCore, (Throwable?) -> Unit) -> Unit) {
+        val dir: File = Files.createTempDirectory("keeper-async").toFile()
+        val exec = Executors.newSingleThreadExecutor()
+        val store = SessionStoreCore(dir, exec)
+        val main = Handler(Looper.getMainLooper())
+        var failure: Throwable? = null
+        var cleanup: (() -> Unit)? = null
+        val finished = AtomicBoolean(false)
+        val done = CountDownLatch(1)
+        main.post {
+            val player = ExoPlayer.Builder(InstrumentationRegistry.getInstrumentation().targetContext).build()
+            player.setShuffleOrder(ShuffleOrder.UnshuffledShuffleOrder(0))
+            val keeper = PlaybackSessionKeeper(player, store).also { it.start() }
+            cleanup = { keeper.release(); player.release() }
+            val finish: (Throwable?) -> Unit = { error ->
+                if (finished.compareAndSet(false, true)) {
+                    failure = error
+                    main.post {
+                        cleanup.invoke()
+                        done.countDown()
+                    }
+                }
+            }
+            try { block(player, keeper, store, finish) } catch (t: Throwable) { finish(t) }
+        }
+        val completed = done.await(30, TimeUnit.SECONDS)
+        if (!completed) main.post { cleanup?.invoke() }
+        exec.shutdown()
+        assertTrue("player event callback did not complete", completed)
+        failure?.let { throw it }
+    }
+
     private fun items(vararg n: Int) = n.map { MediaItemFactory.create(track(it), "?", "?") }
 
-    @Test fun queueAndPositionAreSaved() = scenario { player, _, store ->
+    @Test fun queueAndPositionAreSaved() = asyncScenario { player, _, store, finish ->
+        player.addListener(object : Player.Listener {
+            override fun onEvents(player: Player, events: Player.Events) {
+                if (!events.contains(Player.EVENT_TIMELINE_CHANGED)) return
+                player.removeListener(this)
+                try {
+                    assertEquals(SessionStoreCore.SaveOutcome.DURABLE, store.flushBlocking(5_000))
+                    val saved = store.load()
+                    assertNotNull(saved)
+                    assertEquals(3, saved!!.queue.entries.size)
+                    assertEquals(MediaItemFactory.occurrenceId(player.getMediaItemAt(1)), saved.state!!.currentOccurrenceId)
+                    assertEquals(12_345L, saved.state.positionMs)
+                    assertTrue(saved.state.shuffle)
+                    finish(null)
+                } catch (t: Throwable) {
+                    finish(t)
+                }
+            }
+        })
         player.setMediaItems(items(1, 2, 3), 1, 12_345L)
         player.shuffleModeEnabled = true
-        assertEquals(SessionStoreCore.SaveOutcome.DURABLE, store.flushBlocking(5_000))
-        val saved = store.load()
-        assertNotNull(saved)
-        assertEquals(3, saved!!.queue.entries.size)
-        assertEquals(MediaItemFactory.occurrenceId(player.getMediaItemAt(1)), saved.state!!.currentOccurrenceId)
-        assertTrue(saved.state!!.shuffle)
     }
 
     @Test fun intentionalClearDeletesTheSession() = scenario { player, _, store ->
@@ -94,12 +141,28 @@ class PlaybackSessionKeeperTest {
         assertEquals(true, keeper.queueTouched)
     }
 
-    @Test fun timelineUpdatesWithoutQueueEditsDoNotRewriteTheQueue() = scenario { player, _, store ->
+    @Test fun timelineUpdatesWithoutQueueEditsDoNotRewriteTheQueue() = asyncScenario { player, _, store, finish ->
+        var firstGeneration: Long? = null
+        player.addListener(object : Player.Listener {
+            override fun onEvents(player: Player, events: Player.Events) {
+                try {
+                    if (firstGeneration == null && events.contains(Player.EVENT_TIMELINE_CHANGED)) {
+                        assertEquals(SessionStoreCore.SaveOutcome.DURABLE, store.flushBlocking(5_000))
+                        firstGeneration = store.load()?.queue?.generation
+                        assertNotNull(firstGeneration)
+                        player.seekTo(1, 1_000L) // a position/timeline update, not a queue edit
+                    } else if (firstGeneration != null && events.contains(Player.EVENT_POSITION_DISCONTINUITY)) {
+                        assertEquals(SessionStoreCore.SaveOutcome.DURABLE, store.flushBlocking(5_000))
+                        assertEquals(firstGeneration, store.load()?.queue?.generation)
+                        player.removeListener(this)
+                        finish(null)
+                    }
+                } catch (t: Throwable) {
+                    player.removeListener(this)
+                    finish(t)
+                }
+            }
+        })
         player.setMediaItems(items(1, 2), 0, 0L)
-        assertEquals(SessionStoreCore.SaveOutcome.DURABLE, store.flushBlocking(5_000))
-        val first = store.load()!!.queue.generation
-        player.seekTo(1, 1_000L) // not a queue edit
-        assertEquals(SessionStoreCore.SaveOutcome.DURABLE, store.flushBlocking(5_000))
-        assertEquals(first, store.load()!!.queue.generation)
     }
 }

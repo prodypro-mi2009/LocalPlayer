@@ -34,9 +34,11 @@ fun ArtworkImage(
     size: Dp,
     modifier: Modifier = Modifier,
     cornerRadius: Dp = 6.dp,
+    /** Largest picture to load, in pixels (a big tile does not need the 1024 px version). */
+    maxLoadPx: Int = Int.MAX_VALUE,
 ) {
     val repository = (LocalContext.current.applicationContext as LocalPlayerApp).container.artwork
-    val targetPx = with(LocalDensity.current) { size.roundToPx() }
+    val targetPx = with(LocalDensity.current) { size.roundToPx() }.coerceAtMost(maxLoadPx)
     // State is keyed by the artwork reference: when the track changes, the old bitmap is dropped
     // immediately (never shown for the new track), and the previous load is cancelled by
     // LaunchedEffect, so a slow response for track A can never overwrite track B.
@@ -45,8 +47,11 @@ fun ArtworkImage(
             artwork?.let { repository.peek(it.trackId, it.lastModified, targetPx) },
         )
     }
+    // A big picture takes longer to read: a small one (usually saved already by the lists) is shown at once, then the sharp one replaces it.
+    var preview by remember(artwork, targetPx) { mutableStateOf<Bitmap?>(null) }
     LaunchedEffect(artwork, targetPx) {
         if (artwork != null && bitmap == null) {
+            if (targetPx > PREVIEW_PX) preview = repository.loadCached(artwork.trackId, artwork.lastModified, PREVIEW_PX)
             bitmap = repository.load(artwork.trackId, artwork.sourceUri, artwork.lastModified, targetPx)
         }
     }
@@ -58,7 +63,7 @@ fun ArtworkImage(
             .background(MaterialTheme.colorScheme.surfaceVariant),
         contentAlignment = Alignment.Center,
     ) {
-        val image = bitmap
+        val image = bitmap ?: preview
         if (image != null) {
             Image(
                 bitmap = image.asImageBitmap(),
@@ -76,3 +81,6 @@ fun ArtworkImage(
         }
     }
 }
+
+/** Size of the quick preview shown while a bigger picture loads. */
+private const val PREVIEW_PX = 256

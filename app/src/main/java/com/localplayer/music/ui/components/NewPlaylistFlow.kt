@@ -6,13 +6,15 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.FilledTonalButton
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.material3.CircularProgressIndicator
-import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
@@ -25,6 +27,7 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import com.localplayer.music.R
@@ -40,7 +43,7 @@ private enum class NewPlaylistStep { Choose, Name, ReadingFolder, FolderName, Fo
  * the playlist follows the folder after every library scan.
  */
 @Composable
-fun NewPlaylistFlow(viewModel: LibraryViewModel, onDismiss: () -> Unit) {
+fun NewPlaylistFlow(viewModel: LibraryViewModel, onDismiss: () -> Unit, onOpenDownload: () -> Unit = {}, onOpenSpotify: () -> Unit = {}) {
     var step by remember { mutableStateOf(NewPlaylistStep.Choose) }
     var pickedUri by remember { mutableStateOf<Uri?>(null) }
     var analysis by remember { mutableStateOf<FolderAnalysis?>(null) }
@@ -64,32 +67,36 @@ fun NewPlaylistFlow(viewModel: LibraryViewModel, onDismiss: () -> Unit) {
         }
     }
 
+    // .m3u / .m3u8 from any app or folder (the file types of playlists have no single reliable MIME type, so any file can be picked).
+    val m3uPicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+        if (uri != null) viewModel.importPlaylistM3u(uri)
+        onDismiss()
+    }
+
     when (step) {
         NewPlaylistStep.Choose -> AlertDialog(
             onDismissRequest = onDismiss,
-            title = { Text(stringResource(R.string.new_playlist)) },
+            shape = RoundedCornerShape(32.dp),
+            containerColor = MaterialTheme.colorScheme.surfaceContainerLow,
+            title = { Text(stringResource(R.string.new_playlist), fontWeight = FontWeight.SemiBold) },
             text = {
-                Column {
-                    TextButton(onClick = { step = NewPlaylistStep.Name }, modifier = Modifier.fillMaxWidth()) {
-                        Icon(AppIcons.Add, contentDescription = null, modifier = Modifier.size(20.dp))
-                        Spacer(Modifier.width(8.dp))
-                        Text(stringResource(R.string.new_playlist_regular), modifier = Modifier.weight(1f))
+                Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                    SettingsGroup {
+                        item { AppMenuItem(AppIcons.Add, stringResource(R.string.new_playlist_regular)) { step = NewPlaylistStep.Name } }
+                        item { AppMenuItem(AppIcons.Folder, stringResource(R.string.new_playlist_from_folder)) { picker.launch(null) } }
+                        item { AppMenuItem(AppIcons.Upload, stringResource(R.string.m3u_import)) { m3uPicker.launch(arrayOf("*/*")) } }
+                        // Opens the YouTube download page (yt-dlp) from the settings; the songs it downloads join the library.
+                        item { AppMenuItem(AppIcons.Download, stringResource(R.string.new_playlist_from_youtube)) { onOpenDownload() } }
+                        // The song names of a Spotify playlist, compared with the library.
+                        item { AppMenuItem(AppIcons.MusicNote, stringResource(R.string.new_playlist_from_spotify)) { onOpenSpotify() } }
                     }
-                    TextButton(onClick = { picker.launch(null) }, modifier = Modifier.fillMaxWidth()) {
-                        Icon(AppIcons.Folder, contentDescription = null, modifier = Modifier.size(20.dp))
-                        Spacer(Modifier.width(8.dp))
-                        Text(stringResource(R.string.new_playlist_from_folder), modifier = Modifier.weight(1f))
-                    }
-                    Text(
-                        stringResource(R.string.new_playlist_from_folder_note),
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        modifier = Modifier.padding(top = 8.dp),
-                    )
+                    SettingsNote(stringResource(R.string.new_playlist_from_folder_note))
                 }
             },
             confirmButton = {},
-            dismissButton = { TextButton(onClick = onDismiss) { Text(stringResource(R.string.cancel)) } },
+            dismissButton = {
+                FilledTonalButton(onClick = onDismiss) { Text(stringResource(R.string.cancel)) }
+            },
         )
 
         NewPlaylistStep.Name -> NameDialog(
@@ -143,7 +150,7 @@ fun NewPlaylistFlow(viewModel: LibraryViewModel, onDismiss: () -> Unit) {
                             label = { Text(stringResource(R.string.playlist_name)) },
                         )
                         Text(
-                            stringResource(R.string.folder_playlist_summary, found.filesOnDisk, found.label),
+                            pluralStringResource(R.plurals.folder_playlist_summary, found.filesOnDisk, found.filesOnDisk, found.label),
                             style = MaterialTheme.typography.bodyMedium,
                             modifier = Modifier.padding(top = 12.dp),
                         )

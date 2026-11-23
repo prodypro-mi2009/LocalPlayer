@@ -1,0 +1,10 @@
+# LocalPlayer baseline profile (hand-written, wildcard form).
+#
+# H = hot, S = startup, P = post-startup. Marking all app code lets ART precompile it at install time
+# (speed-profile) instead of interpreting/JIT-ing it on first launch. The app is small (~25k lines), so
+# compiling all of it costs little. Library code (Compose, Media3, Room ...) comes with its own profiles,
+# which the build merges in automatically.
+#
+# If the build ever fails on this file, delete it: the app works exactly as before, only startup is slower.
+Lcom/localplayer/music/**;
+HSPLcom/localplayer/music/**;->**(**)**

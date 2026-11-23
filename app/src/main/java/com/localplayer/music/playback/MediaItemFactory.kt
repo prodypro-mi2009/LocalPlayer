@@ -1,5 +1,6 @@
 package com.localplayer.music.playback
 
+import androidx.core.net.toUri
 import android.net.Uri
 import android.os.Bundle
 import androidx.media3.common.MediaItem
@@ -16,6 +17,7 @@ object MediaItemFactory {
     private const val EXTRA_PLAY_NEXT = "play_next"
     private const val EXTRA_OCCURRENCE = "occurrence_id"
     private const val EXTRA_RANK = "shuffle_rank"
+    private const val EXTRA_ADDED_BY = "jam_added_by"
 
     /** URI scheme understood by [ArtworkBitmapLoader]; used so the media notification can show embedded art. */
     const val ARTWORK_SCHEME = "trackart"
@@ -38,11 +40,7 @@ object MediaItemFactory {
             .setIsBrowsable(false)
             .setExtras(extras)
         if (track.hasArtwork) {
-            metadata.setArtworkUri(
-                Uri.parse(
-                    "$ARTWORK_SCHEME://${track.id}?v=${track.lastModified}&src=${Uri.encode(track.uri)}",
-                ),
-            )
+            metadata.setArtworkUri("$ARTWORK_SCHEME://${track.id}?v=${track.lastModified}&src=${Uri.encode(track.uri)}".toUri())
         }
         return MediaItem.Builder()
             .setMediaId(track.id.toString())
@@ -50,6 +48,48 @@ object MediaItemFactory {
             .setMediaMetadata(metadata.build())
             .build()
     }
+
+    /**
+     * A song a Jam guest sent to this phone: a temporary file that is not part of the library. [addedBy] is the
+     * guest's name; its presence is what marks the item as a Jam song.
+     */
+    fun createJam(
+        file: java.io.File,
+        title: String,
+        artist: String,
+        album: String,
+        durationMs: Long,
+        addedBy: String,
+        unknownArtist: String,
+        unknownAlbum: String,
+    ): MediaItem {
+        val uri = Uri.fromFile(file).toString()
+        val extras = Bundle().apply {
+            putString(EXTRA_SOURCE_URI, uri)
+            putString(EXTRA_ADDED_BY, addedBy)
+            putString(EXTRA_OCCURRENCE, QueueOccurrence.newId())
+        }
+        val metadata = MediaMetadata.Builder()
+            .setTitle(title)
+            .setArtist(artist.ifBlank { unknownArtist })
+            .setAlbumTitle(album.ifBlank { unknownAlbum })
+            .setDurationMs(durationMs.takeIf { it > 0L })
+            .setIsPlayable(true)
+            .setIsBrowsable(false)
+            .setExtras(extras)
+            .build()
+        return MediaItem.Builder()
+            .setMediaId("jam:" + file.nameWithoutExtension)
+            .setUri(uri)
+            .setMediaMetadata(metadata)
+            .build()
+    }
+
+    /** Name of the Jam guest who added this item; null for the host's own songs. */
+    fun addedBy(item: MediaItem): String? = item.mediaMetadata.extras?.getString(EXTRA_ADDED_BY)
+
+    /** The library URI of the item (history, favourites, statistics); null for a Jam song, which is not in the library. */
+    fun libraryUri(item: MediaItem): String? = if (addedBy(item) != null) null else trackUri(item)
 
     /** The stable track URI stored in the item. */
     fun trackUri(item: MediaItem): String? = item.mediaMetadata.extras?.getString(EXTRA_SOURCE_URI)

@@ -1,9 +1,9 @@
 package com.localplayer.music.data.audio
 
+import androidx.core.net.toUri
 import android.content.Context
 import android.media.MediaExtractor
 import android.media.MediaFormat
-import android.net.Uri
 import android.util.LruCache
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -54,7 +54,7 @@ class AudioSpecReader(private val context: Context) {
         val extension = displayName.substringAfterLast('.', "")
         val extractor = MediaExtractor()
         return try {
-            extractor.setDataSource(context, Uri.parse(uri), null)
+            extractor.setDataSource(context, uri.toUri(), null)
             var format: MediaFormat? = null
             for (i in 0 until extractor.trackCount) {
                 val candidate = extractor.getTrackFormat(i)

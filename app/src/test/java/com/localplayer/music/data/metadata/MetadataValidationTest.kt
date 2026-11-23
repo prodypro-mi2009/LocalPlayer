@@ -38,4 +38,20 @@ class MetadataValidationTest {
     }
     @Test fun nulCharacterRejected() = assertNotNull(MetadataValidation.check(MetadataField.TITLE, "a\u0000b"))
     @Test fun anyOtherTextAccepted() = assertNull(MetadataValidation.check(MetadataField.ARTIST, "Rack, X & Y; feat. Z (Ελληνικά)"))
+
+    @Test fun gainIsWrittenWithTwoDecimalsAndAcceptsCommaAndUnit() {
+        assertEquals("-6.50", MetadataValidation.canonicalGain("-6.5"))
+        assertEquals("-6.50", MetadataValidation.canonicalGain(" -6,5 dB "))
+        assertEquals("0.00", MetadataValidation.canonicalGain("-0.001"))
+        assertNull(MetadataValidation.canonicalGain("loud"))
+        assertNull(MetadataValidation.canonicalGain("999"))
+    }
+
+    @Test fun anUnchangedGainIsNotAChangeEvenWhenTypedDifferently() {
+        val tagged = original.copy(replayGainTrack = "-6.50")
+        val edited = MetadataField.entries.associateWith { tagged.value(it).orEmpty() } + (MetadataField.REPLAYGAIN_TRACK to "-6.5")
+        assertEquals(emptyMap<MetadataField, String?>(), MetadataValidation.changesFrom(tagged, edited))
+        val changed = edited + (MetadataField.REPLAYGAIN_TRACK to "-7")
+        assertEquals(mapOf<MetadataField, String?>(MetadataField.REPLAYGAIN_TRACK to "-7.00"), MetadataValidation.changesFrom(tagged, changed))
+    }
 }

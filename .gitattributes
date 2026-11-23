@@ -1,0 +1,11 @@
+/.idea/** export-ignore
+/.gradle/** export-ignore
+/.kotlin/** export-ignore
+/local.properties export-ignore
+/build/** export-ignore
+/app/build/** export-ignore
+/app/.cxx/** export-ignore
+/captures/** export-ignore
+/keystore.properties export-ignore
+*.jks export-ignore
+*.keystore export-ignore

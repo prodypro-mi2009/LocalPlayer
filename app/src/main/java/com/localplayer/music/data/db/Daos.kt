@@ -63,6 +63,8 @@ data class TrackSyncInfo(
 
 data class FolderFile(val folderKey: String, val displayName: String)
 
+data class PlaylistHolds(val playlistId: Long, val n: Int)
+
 data class FolderRow(val folderKey: String, val trackCount: Int)
 
 data class HiddenOrphanRow(val uri: String, val hiddenAt: Long, val displayName: String?, val sizeBytes: Long?)
@@ -132,6 +134,14 @@ interface TrackDao {
 
     @Query("SELECT uri FROM tracks WHERE $VISIBLE")
     suspend fun visibleUris(): List<String>
+
+    /** Every song the library shows, with what duplicate detection and M3U matching need (one-shot, read on demand only). */
+    @Query(
+        "SELECT t.id AS id, t.uri AS uri, t.title AS title, COALESCE(t.primaryArtist, t.artist) AS artist, t.album AS album, " +
+            "t.durationMs AS durationMs, t.sizeBytes AS sizeBytes, t.displayName AS name, t.lastModified AS lastModified " +
+            "FROM tracks t WHERE $VISIBLE_T",
+    )
+    suspend fun visibleBriefs(): List<com.localplayer.music.data.library.DupTrack>
 
     @RawQuery
     suspend fun queryArtistsRaw(query: SupportSQLiteQuery): List<ArtistRow>
@@ -256,6 +266,10 @@ interface TrackDao {
     @Query("SELECT trackUri, primaryArtist FROM primary_artist_overrides")
     suspend fun allOverrides(): List<PrimaryArtistOverrideEntity>
 
+    /** The primary-artist override of one track (null when there is none); avoids loading them all. */
+    @Query("SELECT primaryArtist FROM primary_artist_overrides WHERE trackUri = :uri")
+    suspend fun overrideFor(uri: String): String?
+
     /** Inserts rows with id = 0 (returns the new row id) and updates rows whose id exists (returns -1). */
     @Upsert
     suspend fun upsertAll(tracks: List<TrackEntity>): List<Long>
@@ -315,6 +329,10 @@ interface PlaylistDao {
     @Insert(onConflict = OnConflictStrategy.IGNORE)
     suspend fun insertTrack(entry: PlaylistTrackEntity): Long
 
+    /** For each playlist: how many of the given songs it already holds (at most 900 uris per call). */
+    @Query("SELECT playlistId, COUNT(DISTINCT trackUri) AS n FROM playlist_tracks WHERE trackUri IN (:uris) GROUP BY playlistId")
+    suspend fun countContained(uris: List<String>): List<PlaylistHolds>
+
     @Query("SELECT COALESCE(MAX(position), -1) FROM playlist_tracks WHERE playlistId = :playlistId")
     suspend fun maxPosition(playlistId: Long): Int
 
@@ -356,6 +374,15 @@ interface PlaylistDao {
 
     @Query("SELECT trackUri FROM playlist_tracks WHERE playlistId = :playlistId ORDER BY position")
     suspend fun orderedUris(playlistId: Long): List<String>
+
+    /** The songs of a playlist in order, with the file name (for an .m3u export). Songs that are not in the library any more are left out. */
+    @Query(
+        "SELECT t.id AS id, t.uri AS uri, t.title AS title, COALESCE(t.primaryArtist, t.artist) AS artist, t.album AS album, " +
+            "t.durationMs AS durationMs, t.sizeBytes AS sizeBytes, t.displayName AS name, t.lastModified AS lastModified " +
+            "FROM playlist_tracks pt JOIN tracks t ON t.uri = pt.trackUri WHERE pt.playlistId = :id AND t.isAvailable = 1 " +
+            "ORDER BY pt.position",
+    )
+    suspend fun exportBriefs(id: Long): List<com.localplayer.music.data.library.DupTrack>
 
     @Query(
         "SELECT p.id AS id, p.name AS name, COUNT(t.id) AS trackCount, COALESCE(SUM(t.durationMs), 0) AS totalDurationMs, " +
@@ -497,6 +524,32 @@ interface FolderDao {
     @Query("DELETE FROM library_folders WHERE treeUri = :treeUri")
     suspend fun deleteLibraryFolder(treeUri: String)
 
+    // --- re-linking a renamed / moved picked folder: the song keeps its row id and every reference moves to the new URI ---
+
+    @Query("SELECT id, uri FROM tracks WHERE substr(uri, 1, length(:prefix)) = :prefix")
+    suspend fun idsAndUrisByPrefix(prefix: String): List<IdUri>
+
+    @Query("UPDATE OR IGNORE tracks SET uri = :newUri, folderKey = :folderKey WHERE id = :id")
+    suspend fun moveTrackRow(id: Long, newUri: String, folderKey: String?)
+
+    @Query("UPDATE OR IGNORE playlist_tracks SET trackUri = :newUri WHERE trackUri = :oldUri")
+    suspend fun moveInPlaylists(oldUri: String, newUri: String)
+
+    @Query("UPDATE OR IGNORE listening_history SET trackUri = :newUri WHERE trackUri = :oldUri")
+    suspend fun moveInHistory(oldUri: String, newUri: String)
+
+    @Query("UPDATE OR IGNORE favorites SET trackUri = :newUri WHERE trackUri = :oldUri")
+    suspend fun moveInFavorites(oldUri: String, newUri: String)
+
+    @Query("UPDATE OR IGNORE primary_artist_overrides SET trackUri = :newUri WHERE trackUri = :oldUri")
+    suspend fun moveInOverrides(oldUri: String, newUri: String)
+
+    @Query("UPDATE OR IGNORE hidden_tracks SET trackUri = :newUri WHERE trackUri = :oldUri")
+    suspend fun moveInHidden(oldUri: String, newUri: String)
+
+    @Query("UPDATE OR IGNORE listening_days SET trackUri = :newUri WHERE trackUri = :oldUri")
+    suspend fun moveInListening(oldUri: String, newUri: String)
+
     @Query("SELECT * FROM excluded_folders")
     fun observeExcluded(): Flow<List<ExcludedFolderEntity>>
 
@@ -513,6 +566,8 @@ data class TopTrackRow(
     val plays: Int,
     val listenedMs: Long,
 )
+
+data class IdUri(val id: Long, val uri: String)
 
 data class UriCount(val trackUri: String, val plays: Int)
 
@@ -557,4 +612,79 @@ interface ListeningDao {
     /** Play history from before the statistics existed (version 6 and older), used for "last heard". */
     @Query("SELECT trackUri, 0 AS totalPlays, MAX(playedAt) AS lastAt FROM listening_history GROUP BY trackUri")
     suspend fun legacyLastPlayed(): List<UriStats>
+}
+
+
+/** What song matching needs from a library row (see TrackMatcher). */
+data class TrackMatchRow(
+    val uri: String,
+    val displayName: String?,
+    val title: String?,
+    val artist: String?,
+    val durationMs: Long,
+    val sizeBytes: Long,
+)
+
+/** Reads and bulk-writes the app data that the library backup covers. Used only by backup export/import. */
+@Dao
+interface BackupDao {
+    @Query("SELECT uri, displayName, title, artist, durationMs, sizeBytes FROM tracks")
+    suspend fun matchRows(): List<TrackMatchRow>
+
+    @Query("SELECT * FROM playlists ORDER BY id")
+    suspend fun playlists(): List<PlaylistEntity>
+
+    @Query("SELECT * FROM playlist_tracks ORDER BY playlistId, position")
+    suspend fun playlistTracks(): List<PlaylistTrackEntity>
+
+    @Query("SELECT * FROM favorites")
+    suspend fun favorites(): List<FavoriteEntity>
+
+    @Query("SELECT * FROM listening_history ORDER BY playedAt")
+    suspend fun history(): List<HistoryEntity>
+
+    @Query("SELECT * FROM listening_days")
+    suspend fun days(): List<ListeningDayEntity>
+
+    @Query("SELECT * FROM primary_artist_overrides")
+    suspend fun overrides(): List<PrimaryArtistOverrideEntity>
+
+    @Query("SELECT * FROM hidden_tracks")
+    suspend fun hidden(): List<HiddenTrackEntity>
+
+    @Query("SELECT * FROM excluded_folders")
+    suspend fun excluded(): List<ExcludedFolderEntity>
+
+    @Insert
+    suspend fun insertPlaylist(playlist: PlaylistEntity): Long
+
+    @Insert(onConflict = OnConflictStrategy.IGNORE)
+    suspend fun insertPlaylistTracks(rows: List<PlaylistTrackEntity>): List<Long>
+
+    @Insert(onConflict = OnConflictStrategy.IGNORE)
+    suspend fun insertFavorites(rows: List<FavoriteEntity>): List<Long>
+
+    @Insert(onConflict = OnConflictStrategy.IGNORE)
+    suspend fun insertHistory(rows: List<HistoryEntity>): List<Long>
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun putDays(rows: List<ListeningDayEntity>)
+
+    @Query("UPDATE playlists SET coverFile = :file WHERE id = :id")
+    suspend fun setCover(id: Long, file: String?)
+
+    @Query("DELETE FROM playlists")
+    suspend fun deleteAllPlaylists()
+
+    @Query("DELETE FROM favorites")
+    suspend fun deleteAllFavorites()
+
+    @Query("DELETE FROM listening_history")
+    suspend fun deleteAllHistory()
+
+    @Query("DELETE FROM listening_days")
+    suspend fun deleteAllDays()
+
+    @Query("DELETE FROM excluded_folders")
+    suspend fun deleteAllExcluded()
 }

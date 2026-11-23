@@ -12,6 +12,12 @@ enum class MetadataField {
     DISC_NUMBER,
     COMPOSER,
     COMMENT,
+    /** ReplayGain in dB, written as "-6.50 dB" (MP3 and FLAC only). */
+    REPLAYGAIN_TRACK,
+    REPLAYGAIN_ALBUM,
+    /** ReplayGain peaks as linear numbers (1.0 = full scale), written with six decimals (MP3 and FLAC only). */
+    REPLAYGAIN_TRACK_PEAK,
+    REPLAYGAIN_ALBUM_PEAK,
     /** Embedded lyrics (plain text or LRC). Edited in the lyrics editor, not in the tag screen. */
     LYRICS,
     ;
@@ -19,6 +25,12 @@ enum class MetadataField {
     companion object {
         /** The fields of the "Edit tag" screen (everything except lyrics). */
         val tagScreenFields: List<MetadataField> get() = entries.filter { it != LYRICS }
+
+        /** The ReplayGain peak fields, stored next to the gain. */
+        val peakFields: Set<MetadataField> = setOf(REPLAYGAIN_TRACK_PEAK, REPLAYGAIN_ALBUM_PEAK)
+
+        /** Fields that only MP3 and FLAC can store through the tag library (gain and peak). */
+        val gainFields: Set<MetadataField> = setOf(REPLAYGAIN_TRACK, REPLAYGAIN_ALBUM, REPLAYGAIN_TRACK_PEAK, REPLAYGAIN_ALBUM_PEAK)
     }
 }
 
@@ -53,6 +65,12 @@ data class TrackMetadata(
     val composer: String? = null,
     val comment: String? = null,
     val lyrics: String? = null,
+    /** Gain in dB as text with two decimals ("-6.50"), or null when the file has none. */
+    val replayGainTrack: String? = null,
+    val replayGainAlbum: String? = null,
+    /** Linear peak with six decimals ("0.987654"), or null when the file has none. */
+    val replayGainTrackPeak: String? = null,
+    val replayGainAlbumPeak: String? = null,
     /** Structured multi-value ARTIST entries when the file stores several (e.g. Vorbis ARTIST x2). */
     val artists: List<String> = emptyList(),
     val artworkCount: Int = 0,
@@ -74,6 +92,10 @@ data class TrackMetadata(
         MetadataField.COMPOSER -> composer
         MetadataField.COMMENT -> comment
         MetadataField.LYRICS -> lyrics
+        MetadataField.REPLAYGAIN_TRACK -> replayGainTrack
+        MetadataField.REPLAYGAIN_ALBUM -> replayGainAlbum
+        MetadataField.REPLAYGAIN_TRACK_PEAK -> replayGainTrackPeak
+        MetadataField.REPLAYGAIN_ALBUM_PEAK -> replayGainAlbumPeak
     }
 }
 
@@ -100,7 +122,9 @@ data class WriteCapability(
     companion object {
         fun forContainer(container: AudioContainer): WriteCapability =
             if (container.tagWritable) {
-                WriteCapability(container, MetadataField.entries.toSet(), null)
+                // M4A keeps ReplayGain in free-form atoms the tag library cannot write.
+                val fields = MetadataField.entries.toSet()
+                WriteCapability(container, if (container == AudioContainer.MP4) fields - MetadataField.gainFields else fields, null)
             } else {
                 WriteCapability(container, emptySet(), "Metadata editing is not supported safely for ${container.label}.")
             }

@@ -3,8 +3,6 @@ package com.localplayer.music.ui.components
 import com.localplayer.music.ui.theme.albumGenreFont
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.gestures.detectTapGestures
-import androidx.compose.foundation.gestures.detectVerticalDragGestures
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -13,13 +11,12 @@ import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material3.DropdownMenu
-import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -44,9 +41,8 @@ import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.grid.LazyGridState
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
-import androidx.compose.ui.input.pointer.pointerInput
-import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalResources
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
@@ -62,13 +58,74 @@ enum class ViewMode { GRID, LIST }
 /** "12 songs" / "1 song" (and the Greek equivalents), via a plurals resource. */
 @Composable
 fun songCountText(count: Int): String =
-    LocalContext.current.resources.getQuantityString(R.plurals.song_count, count, count)
+    LocalResources.current.getQuantityString(R.plurals.song_count, count, count)
 
 class SortOption(val label: String, val selected: Boolean, val onSelect: () -> Unit)
 
+/** Height of the action row of a library tab; lists start below it and scroll under it. */
+val ActionRowHeight = 56.dp
+
+/** Height of the soft fade under the action row on the main tabs. */
+val TabFadeHeight = 52.dp
+
+/** Stand-in distance for a scrolled list that has not been measured yet (any value above the pill threshold). */
+private const val UnmeasuredScrolled = 100_000
+
+/** True when the user is right-handed (back button on the right): the action pill then sits on the right side. */
+val LocalPillOnRight = androidx.compose.runtime.compositionLocalOf { false }
+
+/** True with the "Classic" look of the Shuffle row: the row stays at the top and the list starts below it. */
+val LocalClassicActionRow = androidx.compose.runtime.compositionLocalOf { false }
+
+/** Top content padding of a tab's list: room for the overlapping row, or just [extra] when the list starts below the row. */
+@Composable
+fun actionRowContentTop(extra: androidx.compose.ui.unit.Dp = 0.dp): androidx.compose.ui.unit.Dp =
+    if (LocalClassicActionRow.current) extra else ActionRowHeight + extra
+
+/** Classic look: the list starts below the row instead of scrolling under it. No effect with the pill. */
+@Composable
+fun Modifier.actionRowListInset(): Modifier = if (LocalClassicActionRow.current) padding(top = ActionRowHeight) else this
+
+/** Rough distance scrolled, in px (first row size times rows passed, plus the offset into the first row). */
+fun LazyListState.scrollEstimate(): Int {
+    // Right after a tab is re-entered the layout is not measured yet: a restored, scrolled list must still count as scrolled.
+    val first = layoutInfo.visibleItemsInfo.firstOrNull()
+        ?: return if (firstVisibleItemIndex > 0 || firstVisibleItemScrollOffset > 0) UnmeasuredScrolled else 0
+    return firstVisibleItemIndex * first.size + firstVisibleItemScrollOffset
+}
+
+/** Same for a two-column grid. */
+fun LazyGridState.scrollEstimate(): Int {
+    val first = layoutInfo.visibleItemsInfo.firstOrNull()
+        ?: return if (firstVisibleItemIndex > 0 || firstVisibleItemScrollOffset > 0) UnmeasuredScrolled else 0
+    return (firstVisibleItemIndex / 2) * first.size.height + firstVisibleItemScrollOffset
+}
+
+/** How far (in dp) the list has to scroll for the action row to be fully packed into its pill. */
+val ActionRowScrollRange = 120.dp
+
+/**
+ * How far the scrolling has pulled the action row together: 0 at the top of the list, 1 once the list has moved
+ * [ActionRowScrollRange]. It follows the scroll position directly (no timer), so it moves with the finger in both
+ * directions. A restored, scrolled list starts at 1. Returned as a function so that only layout and drawing read it.
+ */
+@Composable
+fun rememberActionRowProgress(position: () -> Int): () -> Float {
+    val rangePx = with(androidx.compose.ui.platform.LocalDensity.current) { ActionRowScrollRange.toPx() }
+    val classic = LocalClassicActionRow.current
+    val current = androidx.compose.runtime.rememberUpdatedState(position)
+    val state = remember(rangePx) {
+        androidx.compose.runtime.derivedStateOf { (current.value().toFloat() / rangePx).coerceIn(0f, 1f) }
+    }
+    // Classic look: the row never packs into the pill.
+    return remember(state, classic) { if (classic) ({ 0f }) else ({ state.value }) }
+}
+
 /**
  * The action row of a library tab: Shuffle, optional "locate current song", grid/list toggle and sort
- * menu. Parts a tab does not need are left out.
+ * menu. Parts a tab does not need are left out. It sits on top of the list. At rest Shuffle is on the left
+ * and the icons on the right; while the list is scrolled they glide together into one pill, in step with the scrolling
+ * ([progress], see [rememberActionRowProgress]).
  */
 @Composable
 fun LibraryActionRow(
@@ -78,17 +135,14 @@ fun LibraryActionRow(
     onToggleView: () -> Unit = {},
     sortOptions: List<SortOption> = emptyList(),
     onLocate: (() -> Unit)? = null,
+    progress: () -> Float = { 0f },
 ) {
-    Row(
-        modifier = modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 4.dp),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
+    ActionRowLayout(progress = progress, modifier = modifier) {
         FilledTonalButton(onClick = onShuffle, colors = com.localplayer.music.ui.theme.tonalButtonColors()) {
             Icon(AppIcons.Shuffle, contentDescription = null, modifier = Modifier.size(18.dp))
             Spacer(Modifier.width(8.dp))
             Text(stringResource(R.string.shuffle))
         }
-        Spacer(Modifier.weight(1f))
         if (onLocate != null) {
             IconButton(onClick = onLocate, modifier = Modifier.size(48.dp)) {
                 Icon(AppIcons.Locate, contentDescription = stringResource(R.string.locate_current))
@@ -110,25 +164,12 @@ fun LibraryActionRow(
                 IconButton(onClick = { open = true }, modifier = Modifier.size(48.dp)) {
                     Icon(AppIcons.Sort, contentDescription = stringResource(R.string.sort_menu))
                 }
-                DropdownMenu(expanded = open, onDismissRequest = { open = false }) {
+                AppDropdownMenu(expanded = open, onDismiss = { open = false }) {
                     sortOptions.forEach { option ->
-                        DropdownMenuItem(
-                            text = {
-                                Text(
-                                    text = option.label,
-                                    fontWeight = if (option.selected) FontWeight.Bold else FontWeight.Normal,
-                                    color = if (option.selected) {
-                                        MaterialTheme.colorScheme.primary
-                                    } else {
-                                        MaterialTheme.colorScheme.onSurface
-                                    },
-                                )
-                            },
-                            onClick = {
-                                open = false
-                                option.onSelect()
-                            },
-                        )
+                        AppMenuItem(icon = null, label = option.label, selected = option.selected) {
+                            open = false
+                            option.onSelect()
+                        }
                     }
                 }
             }
@@ -136,52 +177,63 @@ fun LibraryActionRow(
     }
 }
 
+/** Share of the progress in which the buttons glide together (0 .. this), and where the pill starts to show (this .. 1). */
+private const val MoveEnd = 0.65f
+private const val PillStart = 0.55f
+
 /**
- * Fast scrollbar: a column of the letters that occur (Latin, Greek, #). Tap or drag on the thin strip
- * to jump; the rest of the screen is untouched, so normal vertical scrolling is unaffected.
+ * Lays the buttons of [content] out in a row. [progress] 0 = at rest (the first button on the left, the others against
+ * the right edge); 1 = all packed together inside a pill (on the left, or on the right for right-handed use). [progress] is
+ * read only while laying out and drawing, so following the scroll costs no recomposition. The buttons move closer in
+ * proportion to it; the pill fades in around them while they arrive, and fades out again on the way back.
  */
 @Composable
-fun FastScrollbar(
-    letters: List<Char>,
-    onLetter: (Char) -> Unit,
-    modifier: Modifier = Modifier,
-) {
-    if (letters.size < 2) return
-    var heightPx by remember { mutableStateOf(0) }
-    val pick: (Float) -> Unit = { y ->
-        if (heightPx > 0) {
-            val index = ((y / heightPx) * letters.size).toInt().coerceIn(0, letters.lastIndex)
-            onLetter(letters[index])
-        }
-    }
-    Column(
-        modifier = modifier
-            .width(24.dp)
-            .fillMaxHeight()
-            .onSizeChanged { heightPx = it.height }
-            .pointerInput(letters) { detectTapGestures { offset -> pick(offset.y) } }
-            .pointerInput(letters) {
-                detectVerticalDragGestures(
-                    onDragStart = { offset -> pick(offset.y) },
-                    onVerticalDrag = { change, _ ->
-                        change.consume()
-                        pick(change.position.y)
-                    },
-                )
-            },
-        horizontalAlignment = Alignment.CenterHorizontally,
-    ) {
-        letters.forEach { letter ->
-            Box(Modifier.weight(1f).fillMaxWidth(), contentAlignment = Alignment.Center) {
-                Text(
-                    text = letter.toString(),
-                    fontSize = 10.sp,
-                    lineHeight = 10.sp,
-                    fontWeight = FontWeight.Bold,
-                    color = MaterialTheme.colorScheme.primary,
-                    textAlign = TextAlign.Center,
-                    maxLines = 1,
-                )
+fun ActionRowLayout(progress: () -> Float, modifier: Modifier = Modifier, content: @Composable () -> Unit) {
+    val pillColor = MaterialTheme.colorScheme.surfaceContainerLow
+    val pillBorder = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f)
+    val onRight = LocalPillOnRight.current
+    androidx.compose.ui.layout.Layout(
+        content = {
+            androidx.compose.material3.Surface(
+                modifier = Modifier.graphicsLayer {
+                    val pillP = ((progress() - PillStart) / (1f - PillStart)).coerceIn(0f, 1f)
+                    alpha = pillP
+                    scaleX = 0.9f + 0.1f * pillP
+                    scaleY = 0.9f + 0.1f * pillP
+                },
+                shape = CircleShape,
+                color = pillColor,
+                shadowElevation = 6.dp,
+                border = androidx.compose.foundation.BorderStroke(1.dp, pillBorder),
+            ) {}
+            content()
+        },
+        modifier = modifier.fillMaxWidth().height(ActionRowHeight),
+    ) { measurables, constraints ->
+        val side = 12.dp.roundToPx()
+        val pad = 8.dp.roundToPx()
+        val gap = 4.dp.roundToPx()
+        val full = constraints.maxWidth
+        val h = ActionRowHeight.roundToPx()
+        val items = measurables.drop(1).map { it.measure(androidx.compose.ui.unit.Constraints()) }
+        val packedWidth = items.sumOf { it.width } + gap * (items.size - 1) + 2 * pad
+        val pillHeight = 52.dp.roundToPx()
+        val pill = measurables[0].measure(androidx.compose.ui.unit.Constraints.fixed(packedWidth.coerceAtLeast(0), pillHeight))
+        layout(full, h) {
+            val pillX = if (onRight) full - side - packedWidth else side
+            pill.place(pillX, (h - pillHeight) / 2)
+            // Where each item sits at rest (first left, the rest packed against the right edge) and when packed.
+            var right = full - side
+            val restX = IntArray(items.size)
+            for (i in items.indices.reversed()) {
+                if (i == 0) { restX[i] = side } else { right -= items[i].width; restX[i] = right }
+            }
+            val moveP = (progress() / MoveEnd).coerceIn(0f, 1f)
+            var packedX = pillX + pad
+            items.forEachIndexed { i, item ->
+                val x = androidx.compose.ui.util.lerp(restX[i], packedX, moveP)
+                item.place(x, (h - item.height) / 2)
+                packedX += item.width + gap
             }
         }
     }
@@ -241,19 +293,9 @@ fun SongGridCard(
     }
 }
 
-/** Icon of a genre card, chosen from the genre name. Purely decorative. */
+/** Icon of a genre card, chosen from the genre name (see [GenreKind]). Purely decorative. */
 object GenreStyle {
-    fun icon(name: String?): ImageVector {
-        val n = TextNormalizer.fold(name)
-        return when {
-            n.isEmpty() -> AppIcons.MusicNote
-            listOf("rock", "metal", "punk", "grunge", "indie", "alternative").any { n.contains(it) } -> AppIcons.Album
-            listOf("pop", "hip", "rap", "soul", "folk", "vocal", "singer").any { n.contains(it) } -> AppIcons.Mic
-            listOf("electro", "dance", "house", "techno", "trance", "edm", "dubstep", "ambient").any { n.contains(it) } ->
-                AppIcons.GraphicEq
-            else -> AppIcons.MusicNote
-        }
-    }
+    fun icon(name: String?): ImageVector = GenreKind.of(name)?.let { GenreIcons.of(it) } ?: AppIcons.MusicNote
 
     /** Stable pick (0..2) of one of three theme tones for this name. */
     fun tone(name: String?): Int = ((TextNormalizer.fold(name).hashCode() % 3) + 3) % 3
@@ -297,23 +339,6 @@ fun PlaylistCoverImage(coverFile: String, modifier: Modifier = Modifier) {
                 modifier = Modifier.fillMaxSize(),
             )
         }
-    }
-}
-
-/** Floating round back button for the bottom-left corner of detail screens. */
-@Composable
-fun BottomBackButton(onBack: () -> Unit, modifier: Modifier = Modifier) {
-    val label = stringResource(R.string.back)
-    Box(
-        modifier = modifier
-            .padding(bottom = LocalBottomBarInset.current)
-            .size(52.dp)
-            .clip(CircleShape)
-            .background(MaterialTheme.colorScheme.surfaceContainerHighest)
-            .clickable(onClickLabel = label, onClick = onBack),
-        contentAlignment = Alignment.Center,
-    ) {
-        Icon(AppIcons.ArrowBack, contentDescription = label, tint = MaterialTheme.colorScheme.onSurface)
     }
 }
 
@@ -382,11 +407,11 @@ fun DetailHero(
 private val TopFadeHeight = 72.dp
 
 /** Smoothstep alpha stops for a fade that is fully transparent at the top edge. */
-private fun Modifier.topFadeImpl(strength: (Float) -> Float): Modifier = this
+private fun Modifier.topFadeImpl(fadeHeight: androidx.compose.ui.unit.Dp = TopFadeHeight, strength: (Float) -> Float): Modifier = this
     .graphicsLayer { compositingStrategy = CompositingStrategy.Offscreen }
     .drawWithContent {
         drawContent()
-        val h = TopFadeHeight.toPx()
+        val h = fadeHeight.toPx()
         val s = strength(h).coerceIn(0f, 1f)
         if (s > 0.01f) {
             val stops = Array(9) { i ->
@@ -407,11 +432,14 @@ private fun Modifier.topFadeImpl(strength: (Float) -> Float): Modifier = this
  * of being cut by a hard line under the controls row. Strength follows the scroll offset, so a list at
  * rest is untouched.
  */
-fun Modifier.topFade(state: LazyListState): Modifier = topFadeImpl { h ->
+fun Modifier.topFade(state: LazyListState, height: androidx.compose.ui.unit.Dp = TopFadeHeight): Modifier = topFadeImpl(height) { h ->
     if (state.firstVisibleItemIndex > 0) 1f else state.firstVisibleItemScrollOffset / h
 }
 
-fun Modifier.topFade(state: LazyGridState): Modifier = topFadeImpl { h ->
+/** The same fade for a column that scrolls with [androidx.compose.foundation.verticalScroll] (the settings pages). */
+fun Modifier.topFade(state: androidx.compose.foundation.ScrollState): Modifier = topFadeImpl { h -> state.value / h }
+
+fun Modifier.topFade(state: LazyGridState, height: androidx.compose.ui.unit.Dp = TopFadeHeight): Modifier = topFadeImpl(height) { h ->
     if (state.firstVisibleItemIndex > 0) 1f else state.firstVisibleItemScrollOffset / h
 }
 
@@ -421,10 +449,11 @@ fun FadingLazyColumn(
     modifier: Modifier = Modifier,
     state: LazyListState = androidx.compose.foundation.lazy.rememberLazyListState(),
     contentPadding: androidx.compose.foundation.layout.PaddingValues = androidx.compose.foundation.layout.PaddingValues(0.dp),
+    fadeHeight: androidx.compose.ui.unit.Dp = TopFadeHeight,
     content: androidx.compose.foundation.lazy.LazyListScope.() -> Unit,
 ) {
     androidx.compose.foundation.lazy.LazyColumn(
-        modifier = modifier.topFade(state),
+        modifier = modifier.topFade(state, fadeHeight),
         state = state,
         contentPadding = contentPadding,
         content = content,

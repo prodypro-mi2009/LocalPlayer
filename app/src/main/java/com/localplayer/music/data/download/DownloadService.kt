@@ -53,6 +53,30 @@ class DownloadService : Service() {
         return START_NOT_STICKY
     }
 
+    /**
+     * Android 15+ limits how long a "data sync" service may run. When the time is up the service must stop at once
+     * (otherwise the system crashes the app): the queue is stopped (songs already saved stay) and the person is told.
+     */
+    @android.annotation.SuppressLint("MissingPermission")
+    override fun onTimeout(startId: Int, fgsType: Int) {
+        (application as LocalPlayerApp).container.downloads.stop()
+        stopForeground(STOP_FOREGROUND_REMOVE)
+        stopSelf()
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU ||
+            checkSelfPermission(android.Manifest.permission.POST_NOTIFICATIONS) == android.content.pm.PackageManager.PERMISSION_GRANTED
+        ) {
+            getSystemService(NotificationManager::class.java).notify(
+                TIMEOUT_NOTIFICATION_ID,
+                NotificationCompat.Builder(this, CHANNEL_ID)
+                    .setSmallIcon(R.drawable.ic_notification)
+                    .setContentTitle(getString(R.string.dl_notif_title))
+                    .setContentText(getString(R.string.dl_timeout))
+                    .setAutoCancel(true)
+                    .build(),
+            )
+        }
+    }
+
     override fun onDestroy() {
         scope.cancel()
         super.onDestroy()
@@ -69,7 +93,6 @@ class DownloadService : Service() {
             .build()
 
     private fun createChannel() {
-        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return
         val channel = NotificationChannel(CHANNEL_ID, getString(R.string.dl_notif_channel), NotificationManager.IMPORTANCE_LOW)
         getSystemService(NotificationManager::class.java).createNotificationChannel(channel)
     }
@@ -77,5 +100,6 @@ class DownloadService : Service() {
     private companion object {
         const val CHANNEL_ID = "downloads"
         const val NOTIFICATION_ID = 4107
+        const val TIMEOUT_NOTIFICATION_ID = 4110
     }
 }

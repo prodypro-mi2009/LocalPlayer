@@ -6,6 +6,12 @@ import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
 import android.graphics.Bitmap
+import android.graphics.Canvas
+import android.graphics.Paint
+import android.graphics.PorterDuff
+import android.graphics.PorterDuffXfermode
+import android.graphics.Rect
+import android.graphics.RectF
 import android.os.Handler
 import android.os.Looper
 import android.view.KeyEvent
@@ -38,7 +44,8 @@ object WidgetController {
     private var scope: CoroutineScope? = null
     private var artJob: Job? = null
     private var artKey: String? = null
-    private var art: Bitmap? = null
+    private var artBig: Bitmap? = null
+    private var artSmall: Bitmap? = null
     private var appContext: Context? = null
     private val refresh = Runnable { render() }
 
@@ -91,7 +98,21 @@ object WidgetController {
         main.removeCallbacks(refresh)
         artJob?.cancel(); artJob = null
         scope?.cancel(); scope = null
-        art = null; artKey = null
+        artBig = null; artSmall = null; artKey = null
+    }
+
+    /** Square centre-crop of [src] with rounded corners, [px] wide: the widget artwork always keeps its shape. */
+    private fun rounded(src: Bitmap, px: Int): Bitmap {
+        val side = minOf(src.width, src.height)
+        val out = Bitmap.createBitmap(px, px, Bitmap.Config.ARGB_8888)
+        val canvas = Canvas(out)
+        val paint = Paint(Paint.ANTI_ALIAS_FLAG or Paint.FILTER_BITMAP_FLAG)
+        val radius = px * 0.2f
+        canvas.drawRoundRect(RectF(0f, 0f, px.toFloat(), px.toFloat()), radius, radius, paint)
+        paint.xfermode = PorterDuffXfermode(PorterDuff.Mode.SRC_IN)
+        val from = Rect((src.width - side) / 2, (src.height - side) / 2, (src.width + side) / 2, (src.height + side) / 2)
+        canvas.drawBitmap(src, from, Rect(0, 0, px, px), paint)
+        return out
     }
 
     private fun schedule() {
@@ -140,7 +161,7 @@ object WidgetController {
             // Nothing is loaded (or the service is not running): show the app name, the play button opens the app.
             views.setTextViewText(R.id.widget_title, ctx.getString(R.string.app_name))
             views.setTextViewText(R.id.widget_artist, ctx.getString(R.string.widget_nothing_playing))
-            views.setImageViewResource(R.id.widget_play, R.drawable.ic_widget_play)
+            views.setImageViewResource(R.id.widget_play, R.drawable.ic_widget_play_dark)
             views.setOnClickPendingIntent(R.id.widget_play, openApp(ctx))
             views.setOnClickPendingIntent(R.id.widget_prev, openApp(ctx))
             views.setOnClickPendingIntent(R.id.widget_next, openApp(ctx))
@@ -149,7 +170,7 @@ object WidgetController {
         val md = item.mediaMetadata
         views.setTextViewText(R.id.widget_title, md.title ?: "")
         views.setTextViewText(R.id.widget_artist, md.artist ?: "")
-        views.setImageViewResource(R.id.widget_play, if (p.isPlaying) R.drawable.ic_widget_pause else R.drawable.ic_widget_play)
+        views.setImageViewResource(R.id.widget_play, if (p.isPlaying) R.drawable.ic_widget_pause_dark else R.drawable.ic_widget_play_dark)
         views.setOnClickPendingIntent(R.id.widget_play, mediaKey(ctx, KeyEvent.KEYCODE_MEDIA_PLAY_PAUSE))
         views.setOnClickPendingIntent(R.id.widget_prev, mediaKey(ctx, KeyEvent.KEYCODE_MEDIA_PREVIOUS))
         views.setOnClickPendingIntent(R.id.widget_next, mediaKey(ctx, KeyEvent.KEYCODE_MEDIA_NEXT))
@@ -157,15 +178,19 @@ object WidgetController {
         // Artwork: the app's own cached, downsampled bitmap, loaded once per track (never the full-size picture).
         val ref = MediaItemFactory.artworkRef(item)
         val key = ref?.let { "${it.trackId}_${it.lastModified}" }
-        if (key != null && key == artKey && art != null) {
-            views.setImageViewBitmap(R.id.widget_art, art)
+        val shown = if (expanded) artBig else artSmall
+        if (key != null && key == artKey && shown != null) {
+            views.setImageViewBitmap(R.id.widget_art, shown)
         } else if (ref != null && key != artKey) {
-            artKey = key; art = null
+            artKey = key; artBig = null; artSmall = null
             artJob?.cancel()
             val container = (ctx.applicationContext as LocalPlayerApp).container
             artJob = scope?.launch {
-                val bmp = container.artwork.load(ref.trackId, ref.sourceUri, ref.lastModified, if (expanded) 256 else 128)
-                if (bmp != null && artKey == key) { art = bmp; schedule() }
+                val bmp = container.artwork.load(ref.trackId, ref.sourceUri, ref.lastModified, 320)
+                if (bmp != null && artKey == key) {
+                    artBig = rounded(bmp, 320); artSmall = rounded(bmp, 160)
+                    schedule()
+                }
             }
         }
         return views

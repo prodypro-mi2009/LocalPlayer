@@ -30,6 +30,11 @@ class PreparedImport(
     val archive: ParsedArchive?,
     val isArchive: Boolean,
     internal val tempDir: File?,
+    /** Playlists, favourites, history and rules of an archive that has them. */
+    val library: LibraryData? = null,
+    /** For every song of [library]: the matching song of THIS library, or null. */
+    val resolved: List<String?> = emptyList(),
+    val libraryPreview: List<SectionPreview> = emptyList(),
 )
 
 sealed interface ApplyResult {
@@ -46,6 +51,7 @@ class SettingsBackupManager(
     private val settings: AppSettings,
     private val background: BackgroundRepository,
     private val font: CustomFontRepository,
+    private val libraryBackup: LibraryBackupManager,
 ) {
     // ---- settings <-> map -------------------------------------------------------------------------------------
 
@@ -65,6 +71,7 @@ class SettingsBackupManager(
         put("yourMixCardDismissed", settings.yourMixCardDismissed.value)
         put("mixSettings", settings.mixSettings.value.serialize())
         put("autoUpdateCheck", settings.autoUpdateCheck.value)
+        put("includeBetaUpdates", settings.includeBetaUpdates.value)
         put("widgetsEnabled", settings.widgetsEnabled.value)
         put("replayGainEnabled", settings.replayGainEnabled.value)
         put("replayGainMode", settings.replayGainMode.value.key)
@@ -90,13 +97,14 @@ class SettingsBackupManager(
             "yourMixCardDismissed" -> settings.setYourMixCardDismissed(value as Boolean)
             "mixSettings" -> settings.setMixSettings(MixSettings.parse(value as String))
             "autoUpdateCheck" -> settings.setAutoUpdateCheck(value as Boolean)
+            "includeBetaUpdates" -> settings.setIncludeBetaUpdates(value as Boolean)
             "widgetsEnabled" -> settings.setWidgetsEnabled(value as Boolean)
             "replayGainEnabled" -> settings.setReplayGainEnabled(value as Boolean)
             "replayGainMode" -> settings.setReplayGainMode(ReplayGainMode.fromKey(value as String))
             "replayGainPreventClipping" -> settings.setReplayGainPreventClipping(value as Boolean)
             "equalizerEnabled" -> settings.setEqualizerEnabled(value as Boolean)
             "eqPreset" -> settings.setEqPreset(EqPreset.fromKey(value as String))
-            "eqCustom" -> settings.setEqCustom(EqModel.parseCustom(value as String)!!)
+            "eqCustom" -> settings.setEqCustom(EqModel.parseCustom(value as String) ?: error("Invalid custom equalizer values"))
             else -> error("Unknown setting $key")
         }
     }
@@ -107,6 +115,10 @@ class SettingsBackupManager(
     suspend fun export(target: Uri, complete: Boolean): Result<Unit> = withContext(Dispatchers.IO) {
         val resolver = context.contentResolver
         try {
+            val lib = if (complete) libraryBackup.collect() else null
+            val libraryJson = lib?.takeIf { !it.data.isEmpty }?.let {
+                LibraryBackupCodec.encode(it.data, AppInfo.versionName(context), System.currentTimeMillis())
+            }
             val bg = if (complete) background.fileForBackup() else null
             val ft = if (complete) font.fileForBackup() else null
             val json = BackupFormat.encodeSettings(
@@ -119,8 +131,8 @@ class SettingsBackupManager(
                     val assets = listOfNotNull(
                         bg?.let { f -> BackupArchive.Asset(BackupFormat.BACKGROUND_PATH) { f.inputStream() } },
                         ft?.let { f -> BackupArchive.Asset(BackupFormat.FONT_PATH) { f.inputStream() } },
-                    )
-                    BackupArchive.write(it, json, AppInfo.versionName(context), System.currentTimeMillis(), assets)
+                    ) + (if (libraryJson != null) lib.covers.orEmpty().map { (name, f) -> BackupArchive.Asset(BackupFormat.coverPath(name)) { f.inputStream() } } else emptyList())
+                    BackupArchive.write(it, json, AppInfo.versionName(context), System.currentTimeMillis(), assets, libraryJson)
                 } else {
                     it.write(json.toByteArray(Charsets.UTF_8))
                 }
@@ -129,8 +141,9 @@ class SettingsBackupManager(
             // verify what was really written
             val temp = File(context.cacheDir, "backup-verify").also { it.mkdirs() }
             try {
-                resolver.openInputStream(target)!!.use { input ->
-                    if (complete) BackupArchive.read(input, temp) else BackupFormat.decodeSettings(input.readBytes().toString(Charsets.UTF_8))
+                (resolver.openInputStream(target) ?: error("Cannot read back the written file")).use { input ->
+                    if (complete) BackupArchive.read(input, temp).also { parsed -> parsed.library?.let { LibraryBackupCodec.decode(it) } }
+                    else BackupFormat.decodeSettings(input.readBytes().toString(Charsets.UTF_8))
                 }
             } finally {
                 BackupArchive.cleanup(temp)
@@ -155,7 +168,10 @@ class SettingsBackupManager(
             val validation = SettingsSchema.validate(doc.settings)
             if (validation.valid.isEmpty()) throw BackupFormat.InvalidBackup("The file contains no usable settings")
             val plan = planFor(validation, restoreActivation, archive?.background != null, archive?.font != null)
-            Result.success(PreparedImport(plan, validation, archive, isZip, temp))
+            val library = archive?.library?.let { LibraryBackupCodec.decode(it) }?.takeIf { !it.isEmpty }
+            val resolved = library?.let { LibraryPlan.resolve(it, libraryBackup.matcher()) }.orEmpty()
+            val preview = if (library != null) LibraryPlan.preview(library, resolved) else emptyList()
+            Result.success(PreparedImport(plan, validation, archive, isZip, temp, library, resolved, preview))
         } catch (e: BackupFormat.InvalidBackup) {
             BackupArchive.cleanup(temp); Result.failure(e)
         } catch (e: Exception) {
@@ -187,7 +203,11 @@ class SettingsBackupManager(
      * then the settings. The result is read back and compared; on any mismatch or error the previous settings
      * and asset files are put back.
      */
-    suspend fun apply(prepared: PreparedImport, restoreActivation: Boolean): ApplyResult = withContext(Dispatchers.IO) {
+    suspend fun apply(prepared: PreparedImport, restoreActivation: Boolean, applySettings: Boolean = true): ApplyResult = withContext(Dispatchers.IO) {
+        if (!applySettings) {
+            prepared.tempDir?.let { BackupArchive.cleanup(it) }
+            return@withContext ApplyResult.Success(0, false, false)
+        }
         val before = snapshot()
         val oldBg = background.fileForBackup()?.let { f -> File(context.cacheDir, "undo-bg").also { f.copyTo(it, overwrite = true) } }
         val oldFont = font.fileForBackup()?.let { f -> File(context.cacheDir, "undo-font").also { f.copyTo(it, overwrite = true) } }
@@ -228,10 +248,14 @@ class SettingsBackupManager(
     }
 
     private suspend fun rollback(before: Map<String, Any>, oldBg: File?, oldFont: File?, bgTouched: Boolean, fontTouched: Boolean): Boolean = try {
-        for ((k, v) in before) write(k, v)
+        // One setting that fails to go back must not stop the others from being restored.
+        var allBack = true
+        for ((k, v) in before) {
+            try { write(k, v) } catch (e: Exception) { allBack = false }
+        }
         if (bgTouched) { if (oldBg != null) background.restoreFrom(oldBg) else background.reset() }
         if (fontTouched) { if (oldFont != null) font.restoreFrom(oldFont) else font.remove() }
-        snapshot() == before
+        allBack && snapshot() == before
     } catch (e: Exception) {
         false
     }

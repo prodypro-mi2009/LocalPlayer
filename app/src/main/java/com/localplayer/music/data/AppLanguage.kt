@@ -1,5 +1,6 @@
 package com.localplayer.music.data
 
+import android.annotation.SuppressLint
 import android.content.Context
 import android.content.res.Configuration
 import java.util.Locale
@@ -15,7 +16,11 @@ enum class AppLanguage(val tag: String) {
         fun fromTag(tag: String?, systemTag: String = Locale.getDefault().language): AppLanguage =
             entries.firstOrNull { it.tag == tag } ?: entries.firstOrNull { it.tag == systemTag } ?: ENGLISH
 
-        /** Wraps [base] so every resource lookup (strings.xml / values-el) uses the saved language. */
+        /**
+         * Wraps [base] so every resource lookup (strings.xml / values-el) uses the saved language. The app is shipped as
+         * an APK with both languages inside, so no downloaded language packs are involved.
+         */
+        @SuppressLint("AppBundleLocaleChanges")
         fun wrap(base: Context): Context {
             val saved = base.getSharedPreferences(AppSettings.PREFS_NAME, Context.MODE_PRIVATE)
                 .getString(AppSettings.KEY_LANGUAGE, null)

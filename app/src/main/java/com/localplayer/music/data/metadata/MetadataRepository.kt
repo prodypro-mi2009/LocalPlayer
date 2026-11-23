@@ -1,5 +1,7 @@
 package com.localplayer.music.data.metadata
 
+import androidx.core.net.toUri
+import com.localplayer.music.util.toLowerHex
 import android.Manifest
 import android.app.RecoverableSecurityException
 import android.content.Context
@@ -64,6 +66,9 @@ class MetadataRepository(
     private val resolver = context.contentResolver
     private val tracks = database.trackDao()
 
+    /** Backups of files that are being rewritten live here (private files, NOT the cache), see [WriteJournal]. */
+    private val journal = WriteJournal(File(context.filesDir, "metadata-recovery").apply { mkdirs() })
+
     // --- loading -----------------------------------------------------------------------------
 
     suspend fun load(trackId: Long): LoadedMetadata = withContext(Dispatchers.IO) {
@@ -72,7 +77,7 @@ class MetadataRepository(
         val dir = newWorkDir()
         try {
             val source = File(dir, "source.bin")
-            copyFromUri(Uri.parse(entity.uri), source)
+            copyFromUri(entity.uri.toUri(), source)
             val container = AudioSniffer.sniff(source, entity.displayName)
             if (!container.tagWritable) {
                 return@withContext LoadedMetadata(
@@ -131,6 +136,18 @@ class MetadataRepository(
         }
     }
 
+    /**
+     * ONE system consent dialog for several songs at once (Android 11+). Returns null when nothing has to be asked
+     * (access already granted, not a MediaStore item, or an older Android where each song asks for itself).
+     */
+    suspend fun bulkWriteConsent(uris: List<Uri>): IntentSender? = withContext(Dispatchers.IO) {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.R) return@withContext null
+        val needing = uris.filter { uri ->
+            FolderKeys.isMediaStoreUri(uri.toString()) && !runCatching { resolver.openFileDescriptor(uri, "rw")?.close() }.isSuccess
+        }
+        if (needing.isEmpty()) null else MediaStore.createWriteRequest(resolver, needing).intentSender
+    }
+
     // --- saving ------------------------------------------------------------------------------
 
     /**
@@ -149,9 +166,13 @@ class MetadataRepository(
             MetadataValidation.check(field, value)?.let { throw MetadataException(FailureKind.INVALID_INPUT, it) }
         }
 
-        val uri = Uri.parse(entity.uri)
-        val dir = newWorkDir()
+        val uri = entity.uri.toUri()
+        val dir = journal.newDir()
         var keepBackup = false
+        // The recovery folder is deleted only when the outcome is certain: the save succeeded, the original was put
+        // back, or the journal was never written. Any other way out (even an Error) leaves it for the next start.
+        var journalOpen = false
+        var settled = false
         try {
             requireFreeSpace(uri)
 
@@ -188,11 +209,18 @@ class MetadataRepository(
             }
             val workingDigest = sha256(working)
 
+            // 2b. before the original is touched: force the backup to storage and write the journal. If the app or the
+            // phone stops during the write below, the next start finds this and can offer the original back.
+            syncFile(backup)
+            journal.begin(dir, entity.uri, entity.displayName, sha256(backup), workingDigest)
+            journalOpen = true
+
             // 3. replace the original (through the system-granted write access)
             try {
-                writeBack(uri, working)
+                writeBack(uri, working, debugKill = debugKillRequested())
             } catch (e: Exception) {
                 keepBackup = !restore(uri, backup)
+                settled = !keepBackup
                 throw asMetadataException(e, keepBackup, dir)
             }
 
@@ -213,14 +241,19 @@ class MetadataRepository(
                 }
             } catch (e: Exception) {
                 keepBackup = !restore(uri, backup)
+                settled = !keepBackup
                 throw asMetadataException(e, keepBackup, dir)
             }
+
+            // The new content is confirmed in the real file: this save and any older recovery copy of this file are done.
+            settled = true
+            journal.finishOthers(entity.uri, dir.name)
 
             // 5. only now: refresh the cache from what the file really contains
             refreshCache(entity, uri, actual)
             actual
         } finally {
-            if (!keepBackup) dir.deleteRecursively()
+            if (!keepBackup && (!journalOpen || settled)) dir.deleteRecursively()
             cleanStaleWorkDirs()
         }
     }
@@ -231,7 +264,7 @@ class MetadataRepository(
         val (modified, size) = currentStamp(uri) ?: (entity.lastModified to entity.sizeBytes)
         val groups = tracks.distinctAlbumArtists()
             .mapNotNull { com.localplayer.music.data.library.TextNormalizer.groupKey(it) }.toSet()
-        val override = tracks.allOverrides().firstOrNull { it.trackUri == entity.uri }?.primaryArtist
+        val override = tracks.overrideFor(entity.uri)
         val title = meta.title ?: entity.displayName.substringBeforeLast('.')
         val derived = TrackIndexing.derive(
             title = title,
@@ -300,15 +333,15 @@ class MetadataRepository(
                 null,
             )?.use { c -> if (c.moveToFirst()) c.getLong(0) to c.getLong(1) else null }
         } else
-        resolver.query(
-            uri,
-            arrayOf(MediaStore.MediaColumns.DATE_MODIFIED, MediaStore.MediaColumns.SIZE),
-            null,
-            null,
-            null,
-        )?.use { c ->
-            if (c.moveToFirst()) c.getLong(0) * 1000L to c.getLong(1) else null
-        }
+            resolver.query(
+                uri,
+                arrayOf(MediaStore.MediaColumns.DATE_MODIFIED, MediaStore.MediaColumns.SIZE),
+                null,
+                null,
+                null,
+            )?.use { c ->
+                if (c.moveToFirst()) c.getLong(0) * 1000L to c.getLong(1) else null
+            }
     } catch (e: Exception) {
         null
     }
@@ -345,11 +378,27 @@ class MetadataRepository(
     }
 
     /** Overwrites the real file with [source] and forces the data to storage before returning. */
-    private fun writeBack(uri: Uri, source: File) {
+    private fun writeBack(uri: Uri, source: File, debugKill: Boolean = false) {
         val descriptor = resolver.openFileDescriptor(uri, "wt")
             ?: throw IOException("The file could not be opened for writing.")
         descriptor.use { pfd ->
             java.io.FileOutputStream(pfd.fileDescriptor).use { out ->
+                if (debugKill) {
+                    // TEST ONLY (debuggable builds): write half of the file, then kill the app, like a crash or power loss.
+                    source.inputStream().use { input ->
+                        var left = source.length() / 2
+                        val buffer = ByteArray(64 * 1024)
+                        while (left > 0) {
+                            val read = input.read(buffer, 0, minOf(buffer.size.toLong(), left).toInt())
+                            if (read < 0) break
+                            out.write(buffer, 0, read)
+                            left -= read
+                        }
+                    }
+                    out.flush()
+                    out.fd.sync()
+                    android.os.Process.killProcess(android.os.Process.myPid())
+                }
                 source.inputStream().use { input -> copy(input, out) }
                 out.flush()
                 out.fd.sync()
@@ -384,7 +433,7 @@ class MetadataRepository(
                 digest.update(buffer, 0, read)
             }
         }
-        return digest.digest().joinToString("") { "%02x".format(it) }
+        return digest.digest().toLowerHex()
     }
 
     private fun requireFreeSpace(uri: Uri) {
@@ -437,6 +486,89 @@ class MetadataRepository(
             message
         }
         return MetadataException(kind, detail, e)
+    }
+
+    /**
+     * For testing the recovery of an interrupted save. Works ONLY in a debuggable build and only once, when the file
+     * `debug_kill_during_write` exists in the app's files folder (create it with `adb shell run-as <package> touch
+     * files/debug_kill_during_write`). A release build never does this.
+     */
+    private fun debugKillRequested(): Boolean {
+        if (context.applicationInfo.flags and android.content.pm.ApplicationInfo.FLAG_DEBUGGABLE == 0) return false
+        val flag = File(context.filesDir, "debug_kill_during_write")
+        return flag.exists().also { if (it) flag.delete() }
+    }
+
+    private fun syncFile(file: File) {
+        java.io.RandomAccessFile(file, "rw").use { it.fd.sync() }
+    }
+
+    // --- recovery of an interrupted save (see WriteJournal) -----------------------------------
+
+    /** A save that was cut off and left the file damaged; the user is asked whether to put the original back. */
+    data class InterruptedWrite(val id: String, val uri: String, val displayName: String, val startedAt: Long = 0L)
+
+    /**
+     * Looks for saves that were cut off by a crash, a kill or a power loss. Finished or untouched ones are cleaned up
+     * silently; only files that are really damaged are returned. With no recovery folder this is one directory listing.
+     */
+    suspend fun interruptedWrites(): List<InterruptedWrite> = withContext(Dispatchers.IO) {
+        journal.cleanOrphans()
+        val damaged = mutableListOf<WriteJournal.Entry>()
+        for (entry in journal.pending()) {
+            val current = try {
+                digestOfUri(entry.uri.toUri())
+            } catch (e: FileNotFoundException) {
+                journal.finish(entry.id) // the song was deleted: nothing to restore
+                continue
+            } catch (e: Exception) {
+                continue // cannot be read right now: try again at the next start
+            }
+            when (WriteJournal.classify(current, entry, currentStamp(entry.uri.toUri())?.first)) {
+                WriteJournal.Verdict.COMPLETED, WriteJournal.Verdict.UNCHANGED, WriteJournal.Verdict.CHANGED_LATER -> journal.finish(entry.id)
+                WriteJournal.Verdict.DAMAGED -> damaged += entry
+            }
+        }
+        journal.keepNewest(damaged).map { InterruptedWrite(it.id, it.uri, it.name, it.startedAt) }
+    }
+
+    /**
+     * Puts the kept original back into the file, then checks by SHA-256 that the file is exactly the original again.
+     * The recovery folder is deleted only after that check. Returns false (and keeps the folder) on any problem.
+     */
+    suspend fun restoreInterrupted(id: String): Boolean = withContext(Dispatchers.IO) {
+        val entry = journal.find(id) ?: return@withContext false
+        val backup = journal.backupFile(id)
+        try {
+            if (!backup.isFile || sha256(backup) != entry.backupSha) return@withContext false
+            val uri = entry.uri.toUri()
+            // The file may have changed since the question was asked (replaced by the user, or saved again): only a
+            // file that is still damaged gets the original written over it.
+            if (WriteJournal.classify(digestOfUri(uri), entry, currentStamp(uri)?.first) != WriteJournal.Verdict.DAMAGED) {
+                journal.finish(id)
+                return@withContext true
+            }
+            writeBack(uri, backup)
+            if (digestOfUri(uri) != entry.backupSha) return@withContext false
+            journal.finish(id)
+            true
+        } catch (e: Exception) {
+            false
+        }
+    }
+
+    private fun digestOfUri(uri: Uri): String {
+        val digest = MessageDigest.getInstance("SHA-256")
+        val input = resolver.openInputStream(uri) ?: throw FileNotFoundException("The file could not be opened.")
+        input.use {
+            val buffer = ByteArray(64 * 1024)
+            while (true) {
+                val read = it.read(buffer)
+                if (read < 0) break
+                digest.update(buffer, 0, read)
+            }
+        }
+        return digest.digest().toLowerHex()
     }
 
     private fun workRoot() = File(context.cacheDir, "metadata-work").apply { mkdirs() }

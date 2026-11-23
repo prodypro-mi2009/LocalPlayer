@@ -13,9 +13,7 @@ import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.shrinkVertically
 import androidx.compose.animation.slideInHorizontally
-import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.slideOutHorizontally
-import androidx.compose.animation.slideOutVertically
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.graphics.Color
 
@@ -96,7 +94,7 @@ object Motion {
     const val SCREEN_OUT_DELAY_MS = 0
 
     /** A popped screen stays composed while it animates out; wait this long before dropping its saved state. */
-    const val SCREEN_CLEANUP_MS = 500
+    const val SCREEN_CLEANUP_MS = 700
 
     // ---- Transition helpers. [reduce] = fade only (no slide / expand). ---------------------------------
 
@@ -119,12 +117,17 @@ object Motion {
      * AppRoot); only the leaving screen moves a little to the right and fades away, revealing it. Nothing
      * overlaps in a ghostly half-faded state and nothing disappears abruptly at the end.
      */
-    const val SCREEN_BACK_MS = 260
+    /** Opening a screen: the back step's card played in reverse (a little shorter than the 550 ms of going back). */
+    const val SCREEN_OPEN_MS = 400
+    const val SCREEN_BACK_MS = 550
+
+    /** Going back: starts quickly, lands softly (the "smooth" curve chosen for the back transition). */
+    val BackEase: Easing = CubicBezierEasing(0.32f, 0.72f, 0f, 1f)
 
     fun screenBackExit(reduce: Boolean): ExitTransition {
-        val fade = fadeOut(tween(SCREEN_BACK_MS, easing = EaseOut))
+        val fade = fadeOut(tween(SCREEN_BACK_MS, easing = BackEase))
         if (reduce) return fade
-        return slideOutHorizontally(tween(SCREEN_BACK_MS, easing = EaseOut)) { it / 16 } + fade
+        return slideOutHorizontally(tween(SCREEN_BACK_MS, easing = BackEase)) { it / 16 } + fade
     }
 
     fun trackEnter(forward: Boolean, reduce: Boolean): EnterTransition {

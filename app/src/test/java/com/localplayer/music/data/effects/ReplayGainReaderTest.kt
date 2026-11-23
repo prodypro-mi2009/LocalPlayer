@@ -2,13 +2,9 @@ package com.localplayer.music.data.effects
 
 import com.localplayer.music.data.metadata.FileTagEngine
 import org.jaudiotagger.audio.AudioFileIO
-import org.jaudiotagger.tag.FieldKey
 import org.jaudiotagger.tag.id3.AbstractID3v2Tag
 import org.jaudiotagger.tag.id3.ID3v24Frame
 import org.jaudiotagger.tag.id3.framebody.FrameBodyTXXX
-import org.jaudiotagger.tag.mp4.Mp4Tag
-import org.jaudiotagger.tag.mp4.field.Mp4TagReverseDnsField
-import org.jaudiotagger.tag.vorbiscomment.VorbisCommentTag
 import org.junit.Assert.*
 import org.junit.Before
 import org.junit.Test

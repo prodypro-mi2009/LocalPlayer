@@ -1,5 +1,6 @@
 package com.localplayer.music.data.update
 
+import com.localplayer.music.util.toLowerHex
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import org.json.JSONObject
@@ -44,11 +45,20 @@ sealed interface DownloadResult {
  */
 class UpdateChecker(private val userAgent: String) {
 
-    suspend fun check(repo: String, currentVersion: String): UpdateCheck = withContext(Dispatchers.IO) {
+    companion object {
+        /** No real release APK of this app comes close to this; it only bounds a stream whose size is unknown. */
+        const val MAX_APK_BYTES = 300L * 1024 * 1024
+
+        /** True when a 403 reply is GitHub's rate limit: no requests remaining, or a Retry-After is given. */
+        fun isRateLimit(remaining: String?, retryAfter: String?): Boolean =
+            remaining?.trim() == "0" || !retryAfter.isNullOrBlank()
+    }
+
+    suspend fun check(repo: String, currentVersion: String, includeBeta: Boolean = false): UpdateCheck = withContext(Dispatchers.IO) {
         if (!UpdateRules.isValidRepo(repo)) return@withContext UpdateCheck.NotConfigured
         var connection: HttpURLConnection? = null
         try {
-            connection = (URL("https://api.github.com/repos/$repo/releases/latest").openConnection() as HttpURLConnection).apply {
+            connection = (URL(if (includeBeta) "https://api.github.com/repos/$repo/releases?per_page=15" else "https://api.github.com/repos/$repo/releases/latest").openConnection() as HttpURLConnection).apply {
                 connectTimeout = 8_000
                 readTimeout = 10_000
                 setRequestProperty("User-Agent", userAgent)
@@ -57,16 +67,26 @@ class UpdateChecker(private val userAgent: String) {
             when (val code = connection.responseCode) {
                 200 -> {
                     val body = connection.inputStream.bufferedReader().use { it.readText() }
-                    val release = parseRelease(body, repo) ?: return@withContext UpdateCheck.NoRelease
+                    val release = (if (includeBeta) parseBestRelease(body, repo) else parseRelease(body, repo))
+                        ?: return@withContext UpdateCheck.NoRelease
                     if (VersionCompare.isNewer(release.tag, currentVersion)) UpdateCheck.Newer(release)
                     else UpdateCheck.UpToDate(release.tag)
                 }
                 404 -> UpdateCheck.NoRelease
-                403, 429 -> UpdateCheck.RateLimited
+                429 -> UpdateCheck.RateLimited
+                // GitHub answers 403 for an exhausted rate limit, but also for other refusals: only the first is "rate limited".
+                403 -> if (isRateLimit(connection.getHeaderField("X-RateLimit-Remaining"), connection.getHeaderField("Retry-After"))) {
+                    UpdateCheck.RateLimited
+                } else {
+                    UpdateCheck.Failed(code)
+                }
                 else -> UpdateCheck.Failed(code)
             }
-        } catch (e: Exception) {
+        } catch (e: java.io.IOException) {
+            // No network, DNS failure, timeout, broken TLS: "offline". Anything else below is a real failure.
             UpdateCheck.Offline
+        } catch (e: Exception) {
+            UpdateCheck.Failed(0)
         } finally {
             connection?.disconnect()
         }
@@ -76,13 +96,32 @@ class UpdateChecker(private val userAgent: String) {
      * Reads the release JSON. Drafts, pre-releases and unreadable tags give null (= treated as "no release"). The
      * page and APK links are kept only when they belong to the configured repository on github.com.
      */
-    fun parseRelease(body: String, repo: String): ReleaseInfo? {
+    fun parseRelease(body: String, repo: String, allowPreRelease: Boolean = false): ReleaseInfo? {
         val o = try {
             JSONObject(body)
         } catch (e: Exception) {
             return null
         }
-        if (o.optBoolean("draft", false) || o.optBoolean("prerelease", false)) return null
+        return parseReleaseObject(o, repo, allowPreRelease)
+    }
+
+    /** From a releases LIST (beta channel): the highest readable version among published releases, pre-releases included. */
+    fun parseBestRelease(body: String, repo: String): ReleaseInfo? {
+        val arr = try {
+            org.json.JSONArray(body)
+        } catch (e: Exception) {
+            return null
+        }
+        var best: ReleaseInfo? = null
+        for (i in 0 until arr.length()) {
+            val r = arr.optJSONObject(i)?.let { parseReleaseObject(it, repo, allowPreRelease = true) } ?: continue
+            if (best == null || VersionCompare.isNewer(r.tag, best.tag)) best = r
+        }
+        return best
+    }
+
+    private fun parseReleaseObject(o: JSONObject, repo: String, allowPreRelease: Boolean): ReleaseInfo? {
+        if (o.optBoolean("draft", false) || (!allowPreRelease && o.optBoolean("prerelease", false))) return null
         val tag = o.optString("tag_name").takeIf { VersionCompare.isValid(it) } ?: return null
         val list = ArrayList<UpdateRules.Asset>()
         o.optJSONArray("assets")?.let { assets ->
@@ -123,6 +162,7 @@ class UpdateChecker(private val userAgent: String) {
             if (connection.responseCode != 200) return@withContext DownloadResult.Failed
             if (connection.url.protocol != "https") return@withContext DownloadResult.NotAllowed
             val total = connection.contentLengthLong.takeIf { it > 0 } ?: release.apkSize
+            if (total > MAX_APK_BYTES) return@withContext DownloadResult.Failed
             val digest = MessageDigest.getInstance("SHA-256")
             var done = 0L
             connection.inputStream.use { input ->
@@ -134,12 +174,14 @@ class UpdateChecker(private val userAgent: String) {
                         out.write(buffer, 0, n)
                         digest.update(buffer, 0, n)
                         done += n
+                        // Without a known size the stream could be endless: stop at a generous cap.
+                        if (done > MAX_APK_BYTES) { target.delete(); return@withContext DownloadResult.Failed }
                         if (total > 0) onProgress((done.toFloat() / total).coerceIn(0f, 1f))
                     }
                 }
             }
             if (release.apkSize > 0 && done != release.apkSize) { target.delete(); return@withContext DownloadResult.Corrupt }
-            val hex = digest.digest().joinToString("") { "%02x".format(it) }
+            val hex = digest.digest().toLowerHex()
             if (release.apkSha256 != null && !release.apkSha256.equals(hex, ignoreCase = true)) {
                 target.delete(); return@withContext DownloadResult.Corrupt
             }

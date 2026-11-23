@@ -36,7 +36,7 @@ sealed interface UpdateUi {
  * Android's package installer (which asks the user to confirm). It never installs silently and runs nothing itself.
  */
 class UpdateViewModel(private val container: AppContainer) : ViewModel() {
-    private val context = container.appContext
+    private val context get() = container.appContext
     private val checker = UpdateChecker(AppInfo.userAgent(context))
     private val _state = MutableStateFlow<UpdateUi>(UpdateUi.Idle)
     val state: StateFlow<UpdateUi> = _state.asStateFlow()
@@ -47,7 +47,7 @@ class UpdateViewModel(private val container: AppContainer) : ViewModel() {
         _state.value = UpdateUi.Checking
         job = viewModelScope.launch {
             val current = AppInfo.versionName(context)
-            val result = checker.check(AppInfo.repo(context), current)
+            val result = checker.check(AppInfo.repo(context), current, container.settings.includeBetaUpdates.value)
             if (result !is UpdateCheck.Offline) container.settings.lastUpdateCheckAt = System.currentTimeMillis()
             _state.value = when (result) {
                 is UpdateCheck.Newer -> {

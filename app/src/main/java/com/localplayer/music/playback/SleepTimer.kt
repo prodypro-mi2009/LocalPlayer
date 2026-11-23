@@ -4,6 +4,7 @@ import android.os.Handler
 import android.os.Looper
 import android.os.SystemClock
 import androidx.media3.common.Player
+import androidx.media3.common.util.UnstableApi
 import androidx.media3.exoplayer.ExoPlayer
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -17,6 +18,8 @@ sealed interface SleepTimerState {
     /** Ends at [endsAtElapsedMs] (SystemClock.elapsedRealtime). The UI computes the remaining time itself. */
     data class Counting(val endsAtElapsedMs: Long) : SleepTimerState
     data object EndOfTrack : SleepTimerState
+    /** Playback stops after the LAST song of the queue (repeat is switched off while this is waiting). */
+    data object EndOfQueue : SleepTimerState
 }
 
 /**
@@ -25,11 +28,14 @@ sealed interface SleepTimerState {
  * out, stops playback, stops the service and tells the UI (if it is open) to close the app.
  * All calls must be made on the main thread.
  */
+@androidx.annotation.OptIn(markerClass = [UnstableApi::class])
 object SleepTimer {
     private val handler = Handler(Looper.getMainLooper())
     private var player: ExoPlayer? = null
     private var onFinished: (() -> Unit)? = null
     private var fading = false
+    /** The repeat mode the user had before "end of the queue" switched repeat off (null = nothing to restore). */
+    private var savedRepeatMode: Int? = null
     /** True while the end-of-timer fade-out runs (ReplayGain must not touch the volume then). */
     val isFading: Boolean get() = fading
 
@@ -43,6 +49,10 @@ object SleepTimer {
     private val fire = Runnable { startFade() }
 
     private val listener = object : Player.Listener {
+        override fun onPlaybackStateChanged(playbackState: Int) {
+            if (_state.value == SleepTimerState.EndOfQueue && playbackState == Player.STATE_ENDED) finish()
+        }
+
         override fun onPlayWhenReadyChanged(playWhenReady: Boolean, reason: Int) {
             if (_state.value == SleepTimerState.EndOfTrack && !playWhenReady &&
                 reason == Player.PLAY_WHEN_READY_CHANGE_REASON_END_OF_MEDIA_ITEM
@@ -82,6 +92,16 @@ object SleepTimer {
         _state.value = SleepTimerState.EndOfTrack
     }
 
+    /** Playback goes on to the end of the queue; after the last song everything is stopped. */
+    fun startEndOfQueue() {
+        val p = player ?: return
+        cancelInternal(p)
+        // With repeat on the queue never ends, so repeat is off until the timer is over or cancelled.
+        savedRepeatMode = p.repeatMode
+        p.repeatMode = Player.REPEAT_MODE_OFF
+        _state.value = SleepTimerState.EndOfQueue
+    }
+
     fun cancel() {
         player?.let { cancelInternal(it) }
     }
@@ -92,7 +112,13 @@ object SleepTimer {
         if (fading) p.volume = PlaybackVolume.base
         fading = false
         p.pauseAtEndOfMediaItems = false
+        restoreRepeat(p)
         _state.value = SleepTimerState.Off
+    }
+
+    private fun restoreRepeat(p: ExoPlayer) {
+        savedRepeatMode?.let { p.repeatMode = it }
+        savedRepeatMode = null
     }
 
     private var fadeStepIndex = 0
@@ -121,6 +147,7 @@ object SleepTimer {
         p.clearMediaItems()
         p.volume = PlaybackVolume.base
         p.pauseAtEndOfMediaItems = false
+        restoreRepeat(p)
         fading = false
         _state.value = SleepTimerState.Off
         _finished.tryEmit(Unit)

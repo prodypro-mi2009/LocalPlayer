@@ -1,5 +1,6 @@
 package com.localplayer.music.data.metadata
 
+import com.localplayer.music.util.toLowerHex
 import java.io.File
 import java.io.RandomAccessFile
 import java.security.MessageDigest
@@ -280,5 +281,5 @@ object AudioPayload {
 
     private const val MAX_MOOV = 64L * 1024 * 1024
 
-    private fun hex(bytes: ByteArray) = bytes.joinToString("") { "%02x".format(it) }
+    private fun hex(bytes: ByteArray) = bytes.toLowerHex()
 }

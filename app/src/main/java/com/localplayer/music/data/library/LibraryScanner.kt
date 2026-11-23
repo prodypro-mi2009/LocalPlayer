@@ -1,5 +1,6 @@
 package com.localplayer.music.data.library
 
+import androidx.core.net.toUri
 import android.content.ContentUris
 import android.content.Context
 import android.net.Uri
@@ -33,6 +34,8 @@ class LibraryScanner(
     private val searchIndex: SearchIndex,
     private val coordinator: ScanCoordinator,
 ) {
+    @Volatile private var lastQueryError: String? = null
+
     private val readDispatcher = Dispatchers.IO.limitedParallelism(3)
 
     suspend fun scanAll() = coordinator.run { runPass() }
@@ -55,7 +58,7 @@ class LibraryScanner(
         if (!MediaAccess.audioGranted(context)) return
         val found = withContext(Dispatchers.IO) { queryAudio() }
         if (found == null) {
-            coordinator.fail(ScanFailureKind.QUERY_FAILED)
+            coordinator.fail(ScanFailureKind.QUERY_FAILED, lastQueryError)
             return
         }
         coordinator.update { it.copy(discovered = found.size) }
@@ -74,10 +77,10 @@ class LibraryScanner(
         val unsafePrefixes = ArrayList<String>()
         for (folder in folders) {
             val prefix = FolderAccess.rowPrefix(folder.treeUri)
-            val walk = withContext(Dispatchers.IO) { access.walk(Uri.parse(folder.treeUri)) }
+            val walk = withContext(Dispatchers.IO) { access.walk(folder.treeUri.toUri()) }
             if (walk == null || !walk.complete) unsafePrefixes.add(prefix)
             if (walk == null) {
-                coordinator.fail(ScanFailureKind.QUERY_FAILED, folder.label)
+                coordinator.fail(ScanFailureKind.FOLDER_FAILED, folder.label, folder.treeUri)
                 continue
             }
             for (file in walk.files) {
@@ -255,6 +258,7 @@ class LibraryScanner(
             try {
                 context.contentResolver.query(collection, projection, null, null, null)
             } catch (e: Exception) {
+                lastQueryError = e.javaClass.simpleName + ": " + (e.message ?: "")
                 null
             }
             ) ?: return null

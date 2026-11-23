@@ -19,6 +19,7 @@ import com.localplayer.music.playback.PlayerConnection
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 
 class AppContainer(val appContext: Context) {
@@ -56,7 +57,23 @@ class AppContainer(val appContext: Context) {
         LibraryRepository(database, scanner, fastScanner, coordinator, settings, searchIndex, folderAccess, playlistCovers)
     }
     val downloads: com.localplayer.music.data.download.DownloadManager by lazy {
-        com.localplayer.music.data.download.DownloadManager(appContext, settings) { library.rescan() }
+        com.localplayer.music.data.download.DownloadManager(
+            context = appContext,
+            settings = settings,
+            rescan = { library.rescan() },
+            librarySongs = {
+                library.songs(com.localplayer.music.data.library.SongSort.TITLE).first().map {
+                    com.localplayer.music.data.download.PlaylistSync.LibrarySong(
+                        it.uri,
+                        it.title,
+                        listOfNotNull(it.artist, it.primaryArtist, it.albumArtist).joinToString(" "),
+                    )
+                }
+            },
+        )
+    }
+    val spotifyFill: com.localplayer.music.data.spotify.SpotifyFill by lazy {
+        com.localplayer.music.data.spotify.SpotifyFill(appContext, downloads)
     }
     val replayGain: com.localplayer.music.data.effects.ReplayGainRepository by lazy {
         com.localplayer.music.data.effects.ReplayGainRepository(appContext)
@@ -69,7 +86,13 @@ class AppContainer(val appContext: Context) {
     }
     val audioSpecs: AudioSpecReader by lazy { AudioSpecReader(appContext) }
     val settingsBackup: com.localplayer.music.data.backup.SettingsBackupManager by lazy {
-        com.localplayer.music.data.backup.SettingsBackupManager(appContext, settings, background, customFont)
+        com.localplayer.music.data.backup.SettingsBackupManager(appContext, settings, background, customFont, libraryBackup)
+    }
+    val libraryBackup: com.localplayer.music.data.backup.LibraryBackupManager by lazy {
+        com.localplayer.music.data.backup.LibraryBackupManager(appContext, database, library, playlistCovers)
+    }
+    val autoBackup: com.localplayer.music.data.backup.AutoBackupManager by lazy {
+        com.localplayer.music.data.backup.AutoBackupManager(appContext, settings, settingsBackup)
     }
     val background: BackgroundRepository by lazy { BackgroundRepository(appContext, settings) }
     val customFont: com.localplayer.music.data.artwork.CustomFontRepository by lazy {
@@ -82,4 +105,5 @@ class AppContainer(val appContext: Context) {
         com.localplayer.music.data.mix.MixRepository(database, settings)
     }
     val playerConnection: PlayerConnection by lazy { PlayerConnection(appContext) }
+    val jam: com.localplayer.music.jam.JamManager by lazy { com.localplayer.music.jam.JamManager(appContext, playerConnection) }
 }

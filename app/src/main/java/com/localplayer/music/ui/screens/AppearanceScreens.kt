@@ -11,20 +11,17 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.selection.selectable
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.Button
 import androidx.compose.material3.FilledIconButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -36,11 +33,11 @@ import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Slider
 import androidx.compose.material3.SliderDefaults
 import androidx.compose.material3.Surface
-import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
@@ -70,14 +67,21 @@ import com.localplayer.music.data.personalization.FontChoice
 import com.localplayer.music.data.personalization.PureMode
 import com.localplayer.music.ui.LibraryViewModel
 import com.localplayer.music.ui.components.AppIcons
-import com.localplayer.music.ui.components.DetailTopBar
-import com.localplayer.music.ui.components.LocalBottomBarInset
-import com.localplayer.music.ui.components.SectionHeader
+import com.localplayer.music.ui.components.SettingsCustomRow
+import com.localplayer.music.ui.components.SettingsGroup
+import com.localplayer.music.ui.components.SettingsLinkRow
+import com.localplayer.music.ui.components.SettingsRadioRow
+import com.localplayer.music.ui.components.SettingsScaffold
+import com.localplayer.music.ui.components.SettingsSliderRow
+import com.localplayer.music.ui.components.SettingsSwitchRow
 import com.localplayer.music.ui.nav.NavState
 import com.localplayer.music.ui.theme.AppColors
 import com.localplayer.music.ui.theme.AppFonts
 import com.localplayer.music.ui.theme.onColorFor
+import com.localplayer.music.data.artwork.ArtworkBlur
+import kotlin.math.roundToInt
 import java.util.Locale
+import com.localplayer.music.ui.components.SettingsNote
 
 // ---------------------------------------------------------------- Colors
 
@@ -86,6 +90,9 @@ fun ColorsScreen(nav: NavState, viewModel: LibraryViewModel) {
     val settings = viewModel.settings
     val dynamicColor by settings.dynamicColor.collectAsStateWithLifecycle()
     val artworkColors by settings.artworkColors.collectAsStateWithLifecycle()
+    val artworkBlur by settings.artworkBlur.collectAsStateWithLifecycle()
+    val blurEverywhere by settings.blurEverywhere.collectAsStateWithLifecycle()
+    val blurStrength by settings.blurStrength.collectAsStateWithLifecycle()
     val backgroundVersion by settings.backgroundVersion.collectAsStateWithLifecycle()
     val backgroundDim by settings.backgroundDim.collectAsStateWithLifecycle()
     val controlColors by settings.controlColors.collectAsStateWithLifecycle()
@@ -99,145 +106,160 @@ fun ColorsScreen(nav: NavState, viewModel: LibraryViewModel) {
     }
     var editing by remember { mutableStateOf<ControlColorGroup?>(null) }
 
-    Column(Modifier.fillMaxSize()) {
-        DetailTopBar(title = stringResource(R.string.settings_colors), onBack = { nav.pop() })
-        Column(Modifier.verticalScroll(rememberScrollState())) {
-            Column(Modifier.padding(horizontal = 16.dp)) {
-                SwitchLine(stringResource(R.string.settings_dynamic_color), dynamicColor, viewModel::setDynamicColor, enabled = !pureMode.isOn)
-                SwitchLine(stringResource(R.string.settings_artwork_colors), artworkColors, viewModel::setArtworkColors, enabled = !pureMode.isOn)
-
-                // Pure black / pure white: no colour at all; background one uniform colour, every button the exact opposite.
-                Text(stringResource(R.string.pure_mode_title), style = MaterialTheme.typography.bodyLarge, modifier = Modifier.padding(top = 12.dp))
-                Text(
-                    stringResource(R.string.pure_mode_note),
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+    SettingsScaffold(title = stringResource(R.string.settings_colors), onBack = { nav.pop() }) {
+        val pureOn = pureMode.isOn
+        SettingsGroup {
+            item {
+                SettingsSwitchRow(
+                    stringResource(R.string.settings_dynamic_color), dynamicColor, viewModel::setDynamicColor,
+                    enabled = !pureOn,
                 )
-                PureMode.entries.forEach { mode ->
-                    Row(
-                        Modifier.fillMaxWidth().heightIn(min = 48.dp).selectable(
-                            selected = pureMode == mode,
-                            onClick = { viewModel.setPureMode(mode) },
-                            role = Role.RadioButton,
-                        ),
-                        verticalAlignment = Alignment.CenterVertically,
-                    ) {
-                        RadioButton(selected = pureMode == mode, onClick = null)
-                        Text(
-                            stringResource(
-                                when (mode) {
-                                    PureMode.OFF -> R.string.pure_off
-                                    PureMode.BLACK -> R.string.pure_black
-                                    PureMode.WHITE -> R.string.pure_white
-                                },
-                            ),
-                            modifier = Modifier.padding(start = 12.dp),
-                        )
-                    }
-                }
-                if (pureMode.isOn) {
-                    Text(
-                        stringResource(R.string.pure_mode_active_note),
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+            }
+        }
+
+        // Background made from the album art: exactly one choice. Only the chosen one runs; the others are not
+        // even read (no colour is extracted for the blurred cover, no picture is blurred for the colours).
+        SettingsGroup(title = stringResource(R.string.artwork_bg_title), note = stringResource(R.string.artwork_bg_note)) {
+            item {
+                SettingsRadioRow(
+                    stringResource(R.string.artwork_bg_off), !artworkColors && !artworkBlur,
+                    { viewModel.setArtworkStyle(colors = false, blur = false) }, enabled = !pureOn,
+                )
+            }
+            item {
+                SettingsRadioRow(
+                    stringResource(R.string.artwork_bg_color), artworkColors,
+                    { viewModel.setArtworkStyle(colors = true, blur = false) }, enabled = !pureOn,
+                )
+            }
+            item {
+                SettingsRadioRow(
+                    stringResource(R.string.artwork_bg_blur), artworkBlur,
+                    { viewModel.setArtworkStyle(colors = false, blur = true) }, enabled = !pureOn,
+                )
+            }
+            if (artworkBlur && !pureOn) {
+                item {
+                    SettingsSliderRow(
+                        title = stringResource(R.string.artwork_blur_strength),
+                        valueText = "$blurStrength / ${ArtworkBlur.MAX_LEVEL}",
+                        value = blurStrength.toFloat(),
+                        onChange = { viewModel.setBlurStrength(it.roundToInt()) },
+                        range = ArtworkBlur.MIN_LEVEL.toFloat()..ArtworkBlur.MAX_LEVEL.toFloat(),
+                        steps = ArtworkBlur.MAX_LEVEL - ArtworkBlur.MIN_LEVEL - 1,
+                        note = stringResource(R.string.artwork_blur_strength_note),
                     )
                 }
             }
+            item {
+                SettingsSwitchRow(
+                    stringResource(R.string.artwork_bg_blur_everywhere), blurEverywhere, viewModel::setBlurEverywhere,
+                    enabled = artworkBlur && !pureOn,
+                )
+            }
+        }
 
-            // Background picture (unchanged behaviour, moved here from the main settings list).
-            Text(
-                stringResource(R.string.settings_background),
-                style = MaterialTheme.typography.bodyLarge,
-                modifier = Modifier.padding(start = 16.dp, top = 16.dp, end = 16.dp),
-            )
-            Surface(
-                shape = MaterialTheme.shapes.large,
-                color = MaterialTheme.colorScheme.surfaceContainer,
-                modifier = Modifier.fillMaxWidth().padding(16.dp).height(160.dp),
-            ) {
-                Box(Modifier.fillMaxSize()) {
-                    val image = background
-                    if (image != null) {
-                        Image(bitmap = image, contentDescription = null, contentScale = ContentScale.Crop, modifier = Modifier.fillMaxSize())
-                        Box(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background.copy(alpha = backgroundDim)))
-                    } else {
-                        Text(
-                            stringResource(R.string.background_none),
-                            style = MaterialTheme.typography.bodyMedium,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            modifier = Modifier.align(Alignment.Center),
-                        )
-                    }
-                    IconButton(
-                        onClick = { picker.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)) },
-                        modifier = Modifier.align(Alignment.TopEnd).padding(8.dp),
-                    ) { Icon(AppIcons.Add, contentDescription = stringResource(R.string.background_add)) }
+        // Pure black / pure white: no colour at all; background one uniform colour, every button the exact opposite.
+        SettingsGroup(
+            title = stringResource(R.string.pure_mode_title),
+            note = if (pureOn) stringResource(R.string.pure_mode_active_note) else stringResource(R.string.pure_mode_note),
+        ) {
+            PureMode.entries.forEach { mode ->
+                item {
+                    SettingsRadioRow(
+                        stringResource(
+                            when (mode) {
+                                PureMode.OFF -> R.string.pure_off
+                                PureMode.BLACK -> R.string.pure_black
+                                PureMode.WHITE -> R.string.pure_white
+                            },
+                        ),
+                        pureMode == mode,
+                        { viewModel.setPureMode(mode) },
+                    )
                 }
             }
-            val dimLabel = stringResource(R.string.background_dim)
-            Text(
-                "$dimLabel · ${(backgroundDim * 100).toInt()}%",
-                style = MaterialTheme.typography.bodyMedium,
-                modifier = Modifier.padding(horizontal = 16.dp),
-            )
-            Slider(
-                value = backgroundDim,
-                onValueChange = viewModel::setBackgroundDim,
-                valueRange = 0f..1f,
-                modifier = Modifier.padding(horizontal = 16.dp).semantics { contentDescription = dimLabel },
-            )
+        }
+
+        // Background picture (unchanged behaviour, moved here from the main settings list).
+        SettingsGroup(title = stringResource(R.string.settings_background)) {
+            item {
+                SettingsCustomRow {
+                    Surface(
+                        shape = MaterialTheme.shapes.large,
+                        color = MaterialTheme.colorScheme.surfaceContainerHighest,
+                        modifier = Modifier.fillMaxWidth().height(160.dp),
+                    ) {
+                        Box(Modifier.fillMaxSize()) {
+                            val image = background
+                            if (image != null) {
+                                Image(bitmap = image, contentDescription = null, contentScale = ContentScale.Crop, modifier = Modifier.fillMaxSize())
+                                Box(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background.copy(alpha = backgroundDim)))
+                            } else {
+                                Text(
+                                    stringResource(R.string.background_none),
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    modifier = Modifier.align(Alignment.Center),
+                                )
+                            }
+                            IconButton(
+                                onClick = { picker.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)) },
+                                modifier = Modifier.align(Alignment.TopEnd).padding(8.dp),
+                            ) { Icon(AppIcons.Add, contentDescription = stringResource(R.string.background_add)) }
+                        }
+                    }
+                }
+            }
+            item {
+                SettingsSliderRow(
+                    title = stringResource(R.string.background_dim),
+                    valueText = "${(backgroundDim * 100).toInt()}%",
+                    value = backgroundDim,
+                    onChange = viewModel::setBackgroundDim,
+                )
+            }
             if (backgroundVersion != 0L) {
-                TextButton(onClick = viewModel::resetBackground, modifier = Modifier.padding(horizontal = 8.dp)) {
-                    Text(stringResource(R.string.background_reset))
+                item {
+                    SettingsLinkRow(stringResource(R.string.background_reset), onClick = viewModel::resetBackground)
                 }
             }
+        }
 
-            SectionHeader(stringResource(R.string.colors_buttons_title))
-            Text(
-                stringResource(R.string.colors_buttons_note),
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                modifier = Modifier.padding(horizontal = 16.dp),
-            )
+        SettingsGroup(title = stringResource(R.string.colors_buttons_title), note = stringResource(R.string.colors_buttons_note)) {
             ControlColorGroup.entries.forEach { group ->
-                val saved = controlColors[group]
-                val name = stringResource(groupLabel(group))
-                Row(
-                    Modifier.fillMaxWidth().heightIn(min = 56.dp)
-                        .clickable(role = Role.Button, onClickLabel = name) { editing = group }
-                        .padding(horizontal = 16.dp, vertical = 8.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    Column(Modifier.weight(1f)) {
-                        Text(name, style = MaterialTheme.typography.bodyLarge)
-                        Text(
-                            saved?.let { ColorMath.toHex(it) } ?: stringResource(R.string.color_default),
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        )
-                    }
-                    Swatch(saved?.let { Color(it) }, 32.dp)
+                item {
+                    val saved = controlColors[group]
+                    val name = stringResource(groupLabel(group))
+                    SettingsLinkRow(
+                        title = name,
+                        summary = saved?.let { ColorMath.toHex(it) } ?: stringResource(R.string.color_default),
+                        onClick = { editing = group },
+                        trailing = { Swatch(saved?.let { Color(it) }, 32.dp) },
+                    )
                 }
             }
             // The one colour no setting can change.
-            Row(
-                Modifier.fillMaxWidth().heightIn(min = 56.dp).padding(horizontal = 16.dp, vertical = 8.dp),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                Text(
-                    stringResource(R.string.color_favorite_fixed),
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    modifier = Modifier.weight(1f),
-                )
-                Icon(AppIcons.Heart, contentDescription = null, tint = AppColors.FavoriteRed, modifier = Modifier.size(32.dp))
+            item {
+                SettingsCustomRow {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text(
+                            stringResource(R.string.color_favorite_fixed),
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.weight(1f),
+                        )
+                        Icon(AppIcons.Heart, contentDescription = null, tint = AppColors.FavoriteRed, modifier = Modifier.size(32.dp))
+                    }
+                }
             }
-            TextButton(
-                onClick = viewModel::resetControlColors,
-                enabled = !controlColors.isEmpty,
-                modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
-            ) { Text(stringResource(R.string.color_reset_all)) }
-            Spacer(Modifier.height(24.dp + LocalBottomBarInset.current))
+            item {
+                SettingsLinkRow(
+                    stringResource(R.string.color_reset_all),
+                    onClick = viewModel::resetControlColors,
+                    enabled = !controlColors.isEmpty,
+                )
+            }
         }
     }
 
@@ -260,14 +282,6 @@ private fun groupLabel(group: ControlColorGroup): Int = when (group) {
     ControlColorGroup.PLAYBACK_OPTIONS -> R.string.color_group_playback_options
     ControlColorGroup.NOW_PLAYING_TEXT -> R.string.color_group_now_playing_text
     ControlColorGroup.NAVIGATION -> R.string.color_group_navigation
-}
-
-@Composable
-private fun SwitchLine(label: String, checked: Boolean, onChange: (Boolean) -> Unit, enabled: Boolean = true) {
-    Row(Modifier.fillMaxWidth().heightIn(min = 48.dp).padding(vertical = 4.dp), verticalAlignment = Alignment.CenterVertically) {
-        Text(label, modifier = Modifier.weight(1f))
-        Switch(checked = checked, onCheckedChange = onChange, enabled = enabled)
-    }
 }
 
 /** A round colour sample; null shows an empty ring (= default colour). */
@@ -301,9 +315,9 @@ private fun previewBackground(group: ControlColorGroup): Color = when (group) {
 private fun ColorPickerDialog(group: ControlColorGroup, initial: Int?, onApply: (Int?) -> Unit, onDismiss: () -> Unit) {
     val start = initial ?: PresetColors[0]
     val startHsv = remember { ColorMath.argbToHsv(start) }
-    var hue by remember { mutableStateOf(startHsv[0]) }
-    var sat by remember { mutableStateOf(startHsv[1]) }
-    var value by remember { mutableStateOf(startHsv[2]) }
+    var hue by remember { mutableFloatStateOf(startHsv[0]) }
+    var sat by remember { mutableFloatStateOf(startHsv[1]) }
+    var value by remember { mutableFloatStateOf(startHsv[2]) }
     var hexText by remember { mutableStateOf(ColorMath.toHex(start)) }
     val current = ColorMath.hsvToArgb(hue, sat, value)
     val background = previewBackground(group)
@@ -481,73 +495,61 @@ fun FontsScreen(nav: NavState, viewModel: LibraryViewModel) {
         if (uri != null) viewModel.importCustomFont(uri)
     }
 
-    Column(Modifier.fillMaxSize()) {
-        DetailTopBar(title = stringResource(R.string.settings_fonts), onBack = { nav.pop() })
-        Column(Modifier.verticalScroll(rememberScrollState())) {
-            Text(
-                stringResource(R.string.fonts_note),
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
-            )
+    SettingsScaffold(title = stringResource(R.string.settings_fonts), onBack = { nav.pop() }) {
+        SettingsGroup(note = stringResource(R.string.fonts_note)) {
             FontCategory.entries.forEach { category ->
-                val choice = choices[category]
-                val family = remember(choice, customVersion) { AppFonts.familyFor(choice, customFile) }
-                val name = stringResource(categoryLabel(category))
-                Column(
-                    Modifier.fillMaxWidth().heightIn(min = 72.dp)
-                        .clickable(role = Role.Button, onClickLabel = name) { editing = category }
-                        .padding(horizontal = 16.dp, vertical = 10.dp),
-                ) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Text(name, style = MaterialTheme.typography.bodyLarge, modifier = Modifier.weight(1f))
+                item {
+                    val choice = choices[category]
+                    val family = remember(choice, customVersion) { AppFonts.familyFor(choice, customFile) }
+                    val name = stringResource(categoryLabel(category))
+                    Column(
+                        Modifier.fillMaxWidth().heightIn(min = 72.dp)
+                            .clickable(role = Role.Button, onClickLabel = name) { editing = category }
+                            .padding(horizontal = 16.dp, vertical = 12.dp),
+                    ) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Text(name, style = MaterialTheme.typography.bodyLarge, modifier = Modifier.weight(1f))
+                            Text(
+                                stringResource(choiceLabel(choice)),
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = MaterialTheme.colorScheme.primary,
+                            )
+                        }
                         Text(
-                            stringResource(choiceLabel(choice)),
-                            style = MaterialTheme.typography.bodySmall,
+                            stringResource(R.string.font_sample),
+                            style = MaterialTheme.typography.titleMedium.copy(fontFamily = family ?: FontFamily.Default),
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            maxLines = 1,
+                            overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
+                            modifier = Modifier.padding(top = 4.dp),
                         )
                     }
-                    Text(
-                        stringResource(R.string.font_sample),
-                        style = MaterialTheme.typography.titleMedium.copy(fontFamily = family ?: FontFamily.Default),
-                        maxLines = 1,
-                        overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
-                        modifier = Modifier.padding(top = 4.dp),
-                    )
                 }
             }
-            TextButton(
-                onClick = viewModel::resetFonts,
-                enabled = !choices.isEmpty,
-                modifier = Modifier.padding(horizontal = 8.dp),
-            ) { Text(stringResource(R.string.font_reset_all)) }
-
-            SectionHeader(stringResource(R.string.font_custom_title))
-            Column(Modifier.padding(horizontal = 16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                Text(
-                    stringResource(R.string.font_custom_note),
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-                OutlinedButton(onClick = { picker.launch(arrayOf("*/*")) }, modifier = Modifier.fillMaxWidth()) {
-                    Text(stringResource(R.string.font_import))
-                }
-                if (hasCustom) {
-                    TextButton(onClick = viewModel::removeCustomFont) { Text(stringResource(R.string.font_remove)) }
-                }
-                Text(
-                    stringResource(R.string.font_dot_note),
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-                Text(
-                    stringResource(R.string.font_licenses),
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
+            item {
+                SettingsLinkRow(stringResource(R.string.font_reset_all), onClick = viewModel::resetFonts, enabled = !choices.isEmpty)
             }
-            Spacer(Modifier.height(24.dp + LocalBottomBarInset.current))
         }
+
+        SettingsGroup(title = stringResource(R.string.font_custom_title), note = stringResource(R.string.font_dot_note)) {
+            item {
+                SettingsCustomRow {
+                    Text(
+                        stringResource(R.string.font_custom_note),
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.padding(bottom = 12.dp),
+                    )
+                    OutlinedButton(onClick = { picker.launch(arrayOf("*/*")) }, modifier = Modifier.fillMaxWidth()) {
+                        Text(stringResource(R.string.font_import))
+                    }
+                }
+            }
+            if (hasCustom) {
+                item { SettingsLinkRow(stringResource(R.string.font_remove), onClick = viewModel::removeCustomFont) }
+            }
+        }
+        SettingsNote(stringResource(R.string.font_licenses))
     }
 
     editing?.let { category ->

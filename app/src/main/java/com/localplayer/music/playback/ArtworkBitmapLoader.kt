@@ -16,7 +16,7 @@ import kotlinx.coroutines.launch
  * Lets the media notification / lock screen show embedded artwork without any network access.
  * Handles the private `trackart://<trackId>?v=<lastModified>&src=<encoded file uri>` scheme.
  */
-@OptIn(UnstableApi::class)
+@androidx.annotation.OptIn(markerClass = [UnstableApi::class])
 class ArtworkBitmapLoader(
     private val artwork: ArtworkRepository,
     private val scope: CoroutineScope,

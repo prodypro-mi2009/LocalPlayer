@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Android 11 and older: Android's own (Google) backup carries ONLY the copy that the user switched on in
+     Settings > Backup & restore. Nothing else of the app is included, and when the option is off the folder is empty. -->
+<full-backup-content>
+    <include domain="file" path="auto_backup/" />
+</full-backup-content>

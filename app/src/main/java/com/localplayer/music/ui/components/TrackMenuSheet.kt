@@ -38,6 +38,7 @@ class TrackMenuActions(
     val onGoToArtist: () -> Unit,
     val onEditTag: () -> Unit,
     val onEditLyrics: () -> Unit,
+    val onInfo: () -> Unit,
     val onHide: () -> Unit,
 )
 
@@ -53,7 +54,13 @@ class TrackMenuActions(
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun TrackMenuSheet(track: TrackListItem, actions: TrackMenuActions, onDismiss: () -> Unit) {
+fun TrackMenuSheet(
+    track: TrackListItem,
+    actions: TrackMenuActions,
+    onDismiss: () -> Unit,
+    /** Shown at the right end of the title row (the heart). */
+    trailing: @Composable () -> Unit = {},
+) {
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
     val unknownArtist = stringResource(R.string.unknown_artist)
 
@@ -93,6 +100,7 @@ fun TrackMenuSheet(track: TrackListItem, actions: TrackMenuActions, onDismiss: (
                         overflow = TextOverflow.Ellipsis,
                     )
                 }
+                trailing()
             }
             HorizontalDivider(Modifier.padding(vertical = 8.dp))
 
@@ -108,6 +116,7 @@ fun TrackMenuSheet(track: TrackListItem, actions: TrackMenuActions, onDismiss: (
 
             Entry(AppIcons.Edit, stringResource(R.string.edit_tag), actions.onEditTag)
             Entry(AppIcons.Lyrics, stringResource(R.string.edit_lyrics), actions.onEditLyrics)
+            Entry(AppIcons.Info, stringResource(R.string.track_info), actions.onInfo)
             HorizontalDivider(Modifier.padding(vertical = 8.dp))
 
             Entry(AppIcons.VisibilityOff, stringResource(R.string.hide_song), actions.onHide)

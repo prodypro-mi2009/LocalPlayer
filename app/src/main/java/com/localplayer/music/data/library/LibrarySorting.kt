@@ -72,4 +72,19 @@ object AlphabetIndex {
         for (letter in all) first[letter]?.let { ordered[letter] = it }
         return ordered
     }
+
+    /**
+     * Section of the item at a list position, from the first position of every section (as [firstIndexBySection] returns it).
+     * Used by the scroll bar bubble; it does not depend on the display order of the letters, only on where each section starts.
+     */
+    fun sectionAtIndex(firstIndexBySection: Map<Char, Int>): (Int) -> Char? {
+        val entries = firstIndexBySection.entries.sortedBy { it.value }
+        val starts = IntArray(entries.size) { entries[it].value }
+        val chars = CharArray(entries.size) { entries[it].key }
+        return { index ->
+            var at = java.util.Arrays.binarySearch(starts, index)
+            if (at < 0) at = -at - 2
+            chars.getOrNull(at.coerceAtLeast(0))
+        }
+    }
 }

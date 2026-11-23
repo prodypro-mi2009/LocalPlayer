@@ -51,10 +51,11 @@ class ListeningRecorder(
         meter.release(SystemClock.elapsedRealtime())
     }
 
-    private fun uriOf(item: MediaItem?): String? = item?.localConfiguration?.uri?.toString()
+    private fun uriOf(item: MediaItem?): String? =
+        item?.takeIf { MediaItemFactory.addedBy(it) == null }?.localConfiguration?.uri?.toString()
 
     private fun startItem(item: MediaItem?) {
-        val duration = player.duration.takeIf { it > 0L && it != androidx.media3.common.C.TIME_UNSET } ?: 0L
+        val duration = player.duration.takeIf { it > 0L } ?: 0L
         meter.startItem(uriOf(item), duration, SystemClock.elapsedRealtime(), player.isPlaying)
         scheduleTick()
     }
@@ -74,7 +75,7 @@ class ListeningRecorder(
     override fun onPlaybackStateChanged(playbackState: Int) {
         if (playbackState == Player.STATE_READY) {
             val d = player.duration
-            if (d > 0L && d != androidx.media3.common.C.TIME_UNSET) meter.setDuration(d)
+            if (d > 0L) meter.setDuration(d)
         }
     }
 

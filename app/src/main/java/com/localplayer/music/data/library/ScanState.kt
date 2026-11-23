@@ -4,12 +4,15 @@ enum class ScanFailureKind {
     /** MediaStore could not be queried; nothing was changed in the index. */
     QUERY_FAILED,
 
+    /** A folder the user added through the system picker could not be read (detail = its name). */
+    FOLDER_FAILED,
+
     /** Something unexpected went wrong while reading or writing the index. */
     UNEXPECTED,
 }
 
 /** Why the last scan did not complete. The previously indexed library is kept as it was. */
-data class ScanError(val kind: ScanFailureKind, val detail: String? = null)
+data class ScanError(val kind: ScanFailureKind, val detail: String? = null, val treeUri: String? = null)
 
 data class ScanState(
     val isScanning: Boolean = false,

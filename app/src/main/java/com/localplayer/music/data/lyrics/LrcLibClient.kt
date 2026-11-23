@@ -76,14 +76,15 @@ class LrcLibClient(private val userAgent: String) {
 
     private fun enc(s: String) = URLEncoder.encode(s, "UTF-8")
 
-    /** One request; a temporary server error (5xx, LRCLIB is sometimes overloaded) is retried once after a short pause. */
+    /** One request; a temporary server error (5xx, LRCLIB is sometimes overloaded) is retried twice after short pauses. */
     private suspend fun get(url: String): Http {
-        val first = getOnce(url)
-        if (first is Http.Failed && first.code in 500..599) {
-            delay(RETRY_DELAY_MS)
-            return getOnce(url)
+        var result = getOnce(url)
+        for (pause in RETRY_DELAYS_MS) {
+            if (result !is Http.Failed || result.code !in 500..599) break
+            delay(pause)
+            result = getOnce(url)
         }
-        return first
+        return result
     }
 
     private fun getOnce(url: String): Http {
@@ -155,6 +156,6 @@ class LrcLibClient(private val userAgent: String) {
         const val CONNECT_TIMEOUT_MS = 8_000
         const val READ_TIMEOUT_MS = 10_000
         const val MAX_CHARS = 2_000_000
-        const val RETRY_DELAY_MS = 700L
+        val RETRY_DELAYS_MS = longArrayOf(700L, 1_600L)
     }
 }

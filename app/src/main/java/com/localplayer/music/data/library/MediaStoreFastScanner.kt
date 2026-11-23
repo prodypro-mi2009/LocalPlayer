@@ -1,5 +1,6 @@
 package com.localplayer.music.data.library
 
+import android.annotation.SuppressLint
 import android.content.ContentUris
 import android.content.Context
 import android.os.Build
@@ -27,6 +28,8 @@ class MediaStoreFastScanner(
     private val searchIndex: SearchIndex,
     private val coordinator: ScanCoordinator,
 ) {
+    @Volatile private var lastQueryError: String? = null
+
     suspend fun scanAll() = coordinator.run { runPass() }
 
     /** One pass, to be called inside [ScanCoordinator.run]. */
@@ -39,7 +42,7 @@ class MediaStoreFastScanner(
 
         val found = withContext(Dispatchers.IO) { query() }
         if (found == null) {
-            coordinator.fail(ScanFailureKind.QUERY_FAILED)
+            coordinator.fail(ScanFailureKind.QUERY_FAILED, lastQueryError)
             return
         }
         coordinator.update { it.copy(discovered = found.size) }
@@ -165,6 +168,8 @@ class MediaStoreFastScanner(
     )
 
     /** Returns null when the query fails (the index is then left alone). */
+    // GENRE needs Android 11: runPass() returns before getting here on anything older.
+    @SuppressLint("InlinedApi")
     private fun query(): List<Row>? {
         val collection = MediaStoreAudio.collection()
         val flagColumns = MediaStoreAudio.nonMusicFlagColumns()
@@ -191,6 +196,7 @@ class MediaStoreFastScanner(
             try {
                 context.contentResolver.query(collection, columns, null, null, null)
             } catch (e: Exception) {
+                lastQueryError = e.javaClass.simpleName + ": " + (e.message ?: "")
                 null
             }
             ) ?: return null

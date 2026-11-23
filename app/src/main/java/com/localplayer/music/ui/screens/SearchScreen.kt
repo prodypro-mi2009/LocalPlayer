@@ -13,12 +13,11 @@ import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
-import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
-import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
+import com.localplayer.music.ui.components.AppBackButton
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
@@ -88,9 +87,7 @@ fun SearchScreen(nav: NavState, viewModel: LibraryViewModel, menu: SongMenuContr
             modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 8.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            IconButton(onClick = { nav.pop() }, modifier = Modifier.size(48.dp)) {
-                Icon(AppIcons.ArrowBack, contentDescription = stringResource(R.string.back))
-            }
+            AppBackButton(onClick = { nav.pop() })
             Row(
                 modifier = Modifier.weight(1f).heightIn(min = 52.dp).clip(CircleShape)
                     .background(MaterialTheme.colorScheme.surfaceContainerHigh)
@@ -126,17 +123,17 @@ fun SearchScreen(nav: NavState, viewModel: LibraryViewModel, menu: SongMenuContr
             modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp),
             horizontalArrangement = Arrangement.spacedBy(8.dp),
         ) {
-            FilterChip(
+            FilterPill(
                 selected = filter == SearchFilter.ARTISTS,
                 onClick = { filterName = toggled(filter, SearchFilter.ARTISTS) },
                 label = { Text(stringResource(R.string.filter_artists)) },
             )
-            FilterChip(
+            FilterPill(
                 selected = filter == SearchFilter.SONGS,
                 onClick = { filterName = toggled(filter, SearchFilter.SONGS) },
                 label = { Text(stringResource(R.string.filter_songs)) },
             )
-            FilterChip(
+            FilterPill(
                 selected = filter == SearchFilter.ALBUMS,
                 onClick = { filterName = toggled(filter, SearchFilter.ALBUMS) },
                 label = { Text(stringResource(R.string.filter_albums)) },
@@ -211,3 +208,18 @@ fun SearchScreen(nav: NavState, viewModel: LibraryViewModel, menu: SongMenuContr
 
 private fun toggled(current: SearchFilter?, tapped: SearchFilter): String? =
     if (current == tapped) null else tapped.name
+
+/** A search filter in the same pill style as Play / Shuffle: filled when selected, tonal when not. */
+@androidx.compose.runtime.Composable
+private fun FilterPill(selected: Boolean, onClick: () -> Unit, label: @androidx.compose.runtime.Composable () -> Unit) {
+    val pad = androidx.compose.foundation.layout.PaddingValues(horizontal = 18.dp)
+    if (selected) {
+        androidx.compose.material3.Button(onClick = onClick, contentPadding = pad) { label() }
+    } else {
+        androidx.compose.material3.FilledTonalButton(
+            onClick = onClick,
+            colors = com.localplayer.music.ui.theme.tonalButtonColors(),
+            contentPadding = pad,
+        ) { label() }
+    }
+}

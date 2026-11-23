@@ -22,6 +22,7 @@ import com.localplayer.music.playback.SleepTimerState
 import com.localplayer.music.data.library.AlbumItem
 import com.localplayer.music.data.library.ArtistItem
 import com.localplayer.music.data.library.AddFolderResult
+import com.localplayer.music.data.library.RelinkResult
 import com.localplayer.music.data.library.FolderAnalysis
 import com.localplayer.music.data.library.FolderState
 import com.localplayer.music.data.library.GenreItem
@@ -67,6 +68,19 @@ class LibraryViewModel(private val container: AppContainer) : ViewModel() {
 
     val scanState: StateFlow<ScanState> = library.scanState
     val playerState: StateFlow<PlayerState> = player.state
+
+    val spotifyFill: StateFlow<com.localplayer.music.data.spotify.FillState> = container.spotifyFill.state
+
+    fun findOnYoutube(missing: List<com.localplayer.music.data.spotify.SpotifyTrack>) = container.spotifyFill.start(missing)
+
+    fun stopFill() = container.spotifyFill.stop()
+
+    fun clearFill() = container.spotifyFill.clear()
+
+    /** The open "next / previous song" vote of a Jam (null when none): the player buttons show its number of yes votes. */
+    val jamProposal: StateFlow<com.localplayer.music.jam.JamProposal?> =
+        if (com.localplayer.music.jam.JamSwitch.ENABLED) container.jam.proposal
+        else kotlinx.coroutines.flow.MutableStateFlow<com.localplayer.music.jam.JamProposal?>(null)
     val queue: StateFlow<List<QueueEntry>> = player.queue
 
     private fun <T> Flow<T>.asState(): StateFlow<T?> =
@@ -118,10 +132,38 @@ class LibraryViewModel(private val container: AppContainer) : ViewModel() {
         // Without the media permission the scanner simply does nothing.
         rescan()
         autoCheckForUpdate()
+        autoBackupIfDue()
     }
 
     /**
-     * Periodic update check: at most once a day, only when the user left it on and a repository is configured, and
+     * The two opt-in automatic backups (to a folder; the copy for Android/Google backup): only when the user switched
+     * one on and a week has passed, and a minute after the app opened, never during start-up. Also tells the user once
+     * when a backup copy arrived with Android's restore. All of this is a few cheap checks unless something is due.
+     */
+    private fun autoBackupIfDue() {
+        val backup = container.autoBackup
+        val settings = container.settings
+        val now = System.currentTimeMillis()
+        val folderDue = backup.folderDue(now)
+        val copyDue = backup.androidCopyDue(now)
+        val restored = !settings.restoredCopyNoticed && backup.restoredCopy() != null
+        if (!folderDue && !copyDue && !restored) return
+        viewModelScope.launch {
+            kotlinx.coroutines.delay(60_000)
+            if (restored) {
+                settings.restoredCopyNoticed = true
+                _messages.tryEmit(UiMessage(R.string.backup_restored_found))
+            }
+            val folder = settings.autoBackupFolder.value
+            if (folderDue && !folder.isNullOrEmpty()) {
+                backup.backupToFolder(folder).onFailure { _messages.tryEmit(UiMessage(R.string.backup_auto_failed)) }
+            }
+            if (copyDue) backup.writeAndroidCopy()
+        }
+    }
+
+    /**
+     * Periodic update check: at most once a week, only when the user left it on and a repository is configured, and
      * silent when offline. It only reads the latest release; it never downloads or installs anything by itself.
      */
     private fun autoCheckForUpdate() {
@@ -133,9 +175,9 @@ class LibraryViewModel(private val container: AppContainer) : ViewModel() {
             )
         ) return
         viewModelScope.launch {
-            kotlinx.coroutines.delay(8_000)        // not during app start
+            kotlinx.coroutines.delay(15_000)       // well after app start
             val checker = com.localplayer.music.data.update.UpdateChecker(com.localplayer.music.data.update.AppInfo.userAgent(context))
-            val result = checker.check(repo, com.localplayer.music.data.update.AppInfo.versionName(context))
+            val result = checker.check(repo, com.localplayer.music.data.update.AppInfo.versionName(context), settings.includeBetaUpdates.value)
             if (result is com.localplayer.music.data.update.UpdateCheck.Offline) return@launch   // try again next launch
             settings.lastUpdateCheckAt = System.currentTimeMillis()
             if (result is com.localplayer.music.data.update.UpdateCheck.Newer) {
@@ -212,12 +254,6 @@ class LibraryViewModel(private val container: AppContainer) : ViewModel() {
     fun previous() = player.previous()
     fun seekTo(positionMs: Long) = player.seekTo(positionMs)
     fun playQueueIndex(index: Int) = player.playQueueIndex(index)
-    fun removeQueueIndex(index: Int) {
-        viewModelScope.launch {
-            player.removeQueueItem(index)
-        }
-    }
-    fun moveQueueItem(from: Int, to: Int) = player.moveQueueItem(from, to)
     fun moveQueueEntry(occurrenceId: String, to: Int) = player.moveQueueEntry(occurrenceId, to)
     suspend fun removeQueueEntry(occurrenceId: String) = player.removeQueueEntry(occurrenceId)
     /** Queue screen Clear: keeps only the current song, untouched. Null when there was nothing to clear. */
@@ -312,6 +348,80 @@ class LibraryViewModel(private val container: AppContainer) : ViewModel() {
         viewModelScope.launch { library.unhideAll() }
     }
 
+    // --- duplicate songs (computed only when the screen is opened) ---------------------------------
+
+    private val _duplicates = MutableStateFlow<List<com.localplayer.music.data.library.DupGroup>?>(null)
+    val duplicates: StateFlow<List<com.localplayer.music.data.library.DupGroup>?> = _duplicates.asStateFlow()
+
+    fun findDuplicates() {
+        _duplicates.value = null
+        viewModelScope.launch { _duplicates.value = library.duplicateGroups() }
+    }
+
+    /** Hides the extra copies of every group (or of the groups given); the files stay where they are. */
+    fun hideDuplicateCopies(groups: List<com.localplayer.music.data.library.DupGroup>) {
+        viewModelScope.launch {
+            val uris = library.hideDuplicateCopies(groups)
+            uris.forEach { player.removeAllOfTrack(it) }
+            _messages.tryEmit(UiMessage(R.string.duplicates_hidden, listOf(uris.size.toString())))
+            _duplicates.value = library.duplicateGroups()
+        }
+    }
+
+    // --- playlists as .m3u -----------------------------------------------------------------------
+
+    fun exportPlaylistM3u(id: Long, target: android.net.Uri) {
+        viewModelScope.launch {
+            val ok = withContext(Dispatchers.IO) {
+                runCatching {
+                    val text = library.playlistAsM3u(id) ?: return@runCatching false
+                    container.appContext.contentResolver.openOutputStream(target, "wt")?.use { it.write(text.toByteArray(Charsets.UTF_8)) } != null
+                }.getOrDefault(false)
+            }
+            _messages.tryEmit(UiMessage(if (ok) R.string.m3u_exported else R.string.m3u_export_failed))
+        }
+    }
+
+    fun importPlaylistM3u(source: android.net.Uri) {
+        viewModelScope.launch {
+            val result = runCatching {
+                val text = withContext(Dispatchers.IO) {
+                    container.appContext.contentResolver.openInputStream(source)?.use {
+                        // A playlist is small; anything bigger than 8 MB is not one.
+                        val limit = 8 * 1024 * 1024
+                        val out = java.io.ByteArrayOutputStream()
+                        val buf = ByteArray(16 * 1024)
+                        var total = 0
+                        while (true) {
+                            val n = it.read(buf)
+                            if (n < 0) break
+                            total += n
+                            if (total > limit) return@use null
+                            out.write(buf, 0, n)
+                        }
+                        String(out.toByteArray(), Charsets.UTF_8)
+                    }
+                }
+                val name = withContext(Dispatchers.IO) { displayNameOf(source) }
+                text?.let { library.importM3u(name, it) }
+            }.getOrNull()
+            if (result == null) {
+                _messages.tryEmit(UiMessage(R.string.m3u_import_failed))
+            } else {
+                _messages.tryEmit(UiMessage(R.string.m3u_imported, listOf(result.added.toString(), result.missing.toString())))
+            }
+        }
+    }
+
+    private fun displayNameOf(uri: android.net.Uri): String {
+        val fromProvider = runCatching {
+            container.appContext.contentResolver.query(uri, arrayOf(android.provider.OpenableColumns.DISPLAY_NAME), null, null, null)
+                ?.use { c -> if (c.moveToFirst()) c.getString(0) else null }
+        }.getOrNull()
+        val raw = fromProvider ?: uri.lastPathSegment ?: "Playlist"
+        return raw.substringBeforeLast('.').ifBlank { "Playlist" }
+    }
+
     // --- library folders -----------------------------------------------------------------------
 
     val folderState: StateFlow<FolderState?> = library.folderState().asState()
@@ -332,10 +442,26 @@ class LibraryViewModel(private val container: AppContainer) : ViewModel() {
         }
     }
 
+    /** The folder [oldTree] was renamed or moved; [newTree] is where it is now. */
+    fun relinkLibraryFolder(oldTree: String, newTree: Uri) {
+        viewModelScope.launch {
+            val message = when (val result = library.relinkLibraryFolder(oldTree, newTree)) {
+                is RelinkResult.Done -> UiMessage(R.string.folder_relinked, listOf(result.label, result.moved.toString()))
+                RelinkResult.AlreadyAdded -> UiMessage(R.string.folder_already_added)
+                RelinkResult.Unsupported -> UiMessage(R.string.folder_unsupported)
+                RelinkResult.NoPermission -> UiMessage(R.string.folder_no_permission)
+                RelinkResult.Unreadable -> UiMessage(R.string.folder_relink_unreadable)
+            }
+            _messages.tryEmit(message)
+        }
+    }
+
     fun removeLibraryFolder(treeUri: String) {
         viewModelScope.launch {
             library.removeLibraryFolder(treeUri)
             _messages.tryEmit(UiMessage(R.string.folder_access_removed))
+            // A scan that failed because of this folder must not keep showing its error.
+            rescan()
         }
     }
 
@@ -387,6 +513,7 @@ class LibraryViewModel(private val container: AppContainer) : ViewModel() {
 
     fun startSleepTimer(minutes: Int) = SleepTimer.startMinutes(minutes)
     fun startSleepTimerEndOfTrack() = SleepTimer.startEndOfTrack()
+    fun startSleepTimerEndOfQueue() = SleepTimer.startEndOfQueue()
     fun cancelSleepTimer() = SleepTimer.cancel()
 
     /** "48.0 kHz • 128 kbps • MP3" read from the actual file, or null when nothing is known. */
@@ -394,6 +521,30 @@ class LibraryViewModel(private val container: AppContainer) : ViewModel() {
         val track = container.database.trackDao().getEntityByUri(trackUri) ?: return null
         val specs = container.audioSpecs.read(trackUri, track.displayName, track.sizeBytes, track.durationMs, track.lastModified)
         return AudioSpecFormatter.format(specs)
+    }
+
+    /** Everything the Details screen shows about one song; unknown values are null (never invented). */
+    suspend fun trackInfo(trackId: Long): com.localplayer.music.ui.screens.TrackInfo? {
+        val t = container.database.trackDao().getEntity(trackId) ?: return null
+        val specs = container.audioSpecs.read(t.uri, t.displayName, t.sizeBytes, t.durationMs, t.lastModified)
+        return com.localplayer.music.ui.screens.TrackInfo(
+            title = t.title,
+            artist = t.artist,
+            album = t.album,
+            albumArtist = t.albumArtist,
+            genre = t.genre,
+            year = t.year,
+            trackNumber = t.trackNumber,
+            discNumber = t.discNumber,
+            durationMs = t.durationMs,
+            sizeBytes = t.sizeBytes,
+            format = specs.format,
+            bitrateKbps = specs.bitrateKbps,
+            sampleRateHz = specs.sampleRateHz,
+            dateAdded = t.dateAdded,
+            lastModified = t.lastModified,
+            path = com.localplayer.music.ui.screens.TrackInfo.pathOf(t.folderKey, t.displayName),
+        )
     }
 
     sealed interface LyricsLoad {
@@ -476,6 +627,15 @@ class LibraryViewModel(private val container: AppContainer) : ViewModel() {
 
     val settings: AppSettings = container.settings
 
+    /** True when an automatic check found a version newer than the installed one (red dot on the Settings button). */
+    val updateAvailable: StateFlow<Boolean> = container.settings.knownNewer
+        .map { tag ->
+            tag.isNotEmpty() && com.localplayer.music.data.update.VersionCompare.isNewer(
+                tag, com.localplayer.music.data.update.AppInfo.versionName(container.appContext),
+            )
+        }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), false)
+
     fun setUseMediaStoreScanner(enabled: Boolean) {
         settings.setUseMediaStoreScanner(enabled)
         rescan()
@@ -484,6 +644,14 @@ class LibraryViewModel(private val container: AppContainer) : ViewModel() {
     fun setThemeMode(mode: ThemeMode) = settings.setThemeMode(mode)
     fun setDynamicColor(enabled: Boolean) = settings.setDynamicColor(enabled)
     fun setArtworkColors(enabled: Boolean) = settings.setArtworkColors(enabled)
+    fun setArtworkBlur(enabled: Boolean) = settings.setArtworkBlur(enabled)
+    fun setBlurEverywhere(enabled: Boolean) = settings.setBlurEverywhere(enabled)
+    fun setBlurStrength(level: Int) = settings.setBlurStrength(level)
+    /** Off / colours of the cover / blurred cover (exactly one of them, or none). */
+    fun setArtworkStyle(colors: Boolean, blur: Boolean) {
+        settings.setArtworkColors(colors)
+        settings.setArtworkBlur(blur)
+    }
 
     fun setBackground(uri: Uri) {
         viewModelScope.launch {

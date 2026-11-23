@@ -104,6 +104,8 @@ class SongMenuController(
             TrackMenuSheet(
                 track = track,
                 onDismiss = { menuTrack = null },
+                // The heart (same red outline as Now Playing): a tap adds / removes the favourite and the sheet stays open.
+                trailing = { com.localplayer.music.ui.player.FavoriteButton(viewModel, track.uri) },
                 actions = TrackMenuActions(
                     onPlayNext = { playNextWithUndo(track) },
                     onAddToQueue = { addToQueueEndWithUndo(track) },
@@ -122,6 +124,7 @@ class SongMenuController(
                     },
                     onEditTag = { nav.push(Screen.EditMetadata(track.id)) },
                     onEditLyrics = { nav.push(Screen.LyricsEditor(track.id)) },
+                    onInfo = { nav.push(Screen.TrackInfo(track.id)) },
                     onHide = { hideWithUndo(track) },
                 ),
             )

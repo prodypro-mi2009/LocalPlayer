@@ -31,6 +31,7 @@ abstract class AppDatabase : RoomDatabase() {
     abstract fun hiddenDao(): HiddenDao
     abstract fun folderDao(): FolderDao
     abstract fun listeningDao(): ListeningDao
+    abstract fun backupDao(): BackupDao
 
     companion object {
         /**

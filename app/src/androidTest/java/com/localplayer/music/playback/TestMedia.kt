@@ -2,13 +2,13 @@ package com.localplayer.music.playback
 
 import android.os.Handler
 import android.os.Looper
-import androidx.media3.common.MediaItem
-import com.localplayer.music.data.db.TrackListItem
 import java.io.File
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
+import com.localplayer.music.data.db.TrackListItem
+import androidx.media3.common.MediaItem
 
 /** Shared helpers of the instrumented queue tests. */
 object TestMedia {

@@ -152,6 +152,9 @@ object AppIcons {
             "M21 19V5c0-1.1-.9-2-2-2H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2zM8.5 13.5l2.5 3.01L14.5 12l4.5 6H5l3.5-4.5z",
         )
     }
+    val ContentCopy by lazy { icon("ContentCopy", "M16 1H4c-1.1 0-2 .9-2 2v14h2V3h12V1zm3 4H8c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h11c1.1 0 2-.9 2-2V7c0-1.1-.9-2-2-2zm0 16H8V7h11v14z") }
+    val Upload by lazy { icon("Upload", "M9 16h6v-6h4l-7-7-7 7h4zm-4 2h14v2H5z") }
+    val Cast by lazy { icon("Cast", "M21 3H3c-1.1 0-2 .9-2 2v3h2V5h18v14h-7v2h7c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2zM1 18v3h3c0-1.66-1.34-3-3-3zm0-4v2c2.76 0 5 2.24 5 5h2c0-3.87-3.13-7-7-7zm0-4v2c4.97 0 9 4.03 9 9h2c0-6.08-4.93-11-11-11z") }
     val Download by lazy { icon("Download", "M19 9h-4V3H9v6H5l7 7 7-7zM5 18v2h14v-2H5z") }
     val ContentPaste by lazy {
         icon(
@@ -183,6 +186,7 @@ object AppIcons {
     val CloudUpload by lazy { icon("CloudUpload", "M19.35 10.04C18.67 6.59 15.64 4 12 4 9.11 4 6.6 5.64 5.35 8.04 2.34 8.36 0 10.91 0 14c0 3.31 2.69 6 6 6h13c2.76 0 5-2.24 5-5 0-2.64-2.05-4.78-4.65-4.96zM14 13v4h-4v-4H7l5-5 5 5h-3z") }
     val Info by lazy { icon("Info", "M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm1 15h-2v-6h2v6zm0-8h-2V7h2v2z") }
     val DragHandle by lazy { icon("DragHandle", "M3 8h18V6H3v2zm0 5h18v-2H3v2zm0 5h18v-2H3v2z") }
+    val Delete by lazy { icon("Delete", "M6 19c0 1.1.9 2 2 2h8c1.1 0 2-.9 2-2V7H6v12zM19 4h-3.5l-1-1h-5l-1 1H5v2h14V4z") }
     val ArrowDown by lazy { icon("ArrowDown", "M7.41 8.59L12 13.17l4.59-4.58L18 10l-6 6-6-6z") }
 
     private fun icon(name: String, pathData: String): ImageVector {

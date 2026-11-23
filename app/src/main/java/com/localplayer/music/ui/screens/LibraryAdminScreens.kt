@@ -14,13 +14,13 @@ import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.selection.toggleable
+import androidx.compose.foundation.layout.Box
 import androidx.compose.material3.Button
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
-import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Switch
@@ -33,6 +33,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.style.TextOverflow
@@ -158,7 +159,7 @@ fun LibraryFoldersScreen(nav: NavState, viewModel: LibraryViewModel) {
                         }
                     }
                     if (scan.isScanning) {
-                        LinearProgressIndicator(Modifier.fillMaxWidth().padding(top = 12.dp))
+                        com.localplayer.music.ui.components.ChunkyProgress(null, Modifier.padding(top = 12.dp))
                         Text(
                             stringResource(R.string.folders_scanning),
                             style = MaterialTheme.typography.bodySmall,
@@ -169,8 +170,7 @@ fun LibraryFoldersScreen(nav: NavState, viewModel: LibraryViewModel) {
             }
 
             item(key = "added-header") { SectionHeader(stringResource(R.string.added_folders)) }
-            val folders = state
-            if (folders == null) return@FadingLazyColumn
+            val folders = state ?: return@FadingLazyColumn
             if (folders.added.isEmpty()) {
                 item(key = "added-empty") {
                     Text(
@@ -232,7 +232,7 @@ private fun AddedFolderRow(folder: AddedFolder, onRemove: () -> Unit) {
                     overflow = TextOverflow.Ellipsis,
                 )
                 Text(
-                    stringResource(R.string.track_count, folder.trackCount) + " · " +
+                    pluralStringResource(R.plurals.track_count, folder.trackCount, folder.trackCount) + " · " +
                         stringResource(if (folder.accessible) R.string.folder_access_ok else R.string.folder_access_lost),
                     style = MaterialTheme.typography.bodySmall,
                     color = if (folder.accessible) MaterialTheme.colorScheme.onSurfaceVariant else MaterialTheme.colorScheme.error,
@@ -272,7 +272,7 @@ private fun FolderSwitchRow(entry: FolderEntry, onChange: (Boolean) -> Unit) {
             val subtitle = when {
                 lockedByParent -> stringResource(R.string.folder_excluded_by, folderDisplay(entry.excludedBy.orEmpty()))
                 entry.excluded -> stringResource(R.string.folder_excluded)
-                else -> stringResource(R.string.track_count, entry.trackCount)
+                else -> pluralStringResource(R.plurals.track_count, entry.trackCount, entry.trackCount)
             }
             Text(
                 subtitle,
@@ -281,5 +281,67 @@ private fun FolderSwitchRow(entry: FolderEntry, onChange: (Boolean) -> Unit) {
             )
         }
         Switch(checked = included, onCheckedChange = null, enabled = !lockedByParent)
+    }
+}
+
+
+/**
+ * Settings > Library > Duplicate songs. The check runs only when this screen opens (title + artist + duration, no file is read).
+ * "Hide extra copies" hides all but the biggest file of each group; nothing is deleted, and Hidden songs brings them back.
+ */
+@Composable
+fun DuplicatesScreen(nav: NavState, viewModel: LibraryViewModel) {
+    val groups by viewModel.duplicates.collectAsStateWithLifecycle()
+    androidx.compose.runtime.LaunchedEffect(Unit) { viewModel.findDuplicates() }
+    val list = groups
+    Column(Modifier.fillMaxSize()) {
+        DetailTopBar(
+            title = stringResource(R.string.duplicates_title),
+            onBack = { nav.pop() },
+            actions = {
+                if (!list.isNullOrEmpty()) {
+                    TextButton(onClick = { viewModel.hideDuplicateCopies(list) }) { Text(stringResource(R.string.duplicates_hide_all)) }
+                }
+            },
+        )
+        when {
+            list == null -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { CircularProgressIndicator() }
+            list.isEmpty() -> EmptyState(stringResource(R.string.duplicates_empty), Modifier.fillMaxSize())
+            else -> FadingLazyColumn(Modifier.fillMaxSize(), contentPadding = barPadding(extra = 8.dp)) {
+                item(key = "note") {
+                    Text(
+                        pluralStringResource(R.plurals.duplicates_note, list.size, list.size),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
+                    )
+                }
+                items(list, key = { g -> g.keep.id }) { g ->
+                    Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp)) {
+                        Text(g.keep.title, style = MaterialTheme.typography.bodyLarge, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                        Text(
+                            listOfNotNull(
+                                g.keep.artist,
+                                stringResource(if (g.sameFile) R.string.duplicates_same_file else R.string.duplicates_similar),
+                            ).joinToString(" • "),
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                        for (t in g.tracks) {
+                            val keep = t.id == g.keep.id
+                            Text(
+                                (if (keep) "✓ " else "– ") + (t.name ?: t.title) + "  (" + android.text.format.Formatter.formatShortFileSize(androidx.compose.ui.platform.LocalContext.current, t.sizeBytes) + ")",
+                                style = MaterialTheme.typography.bodySmall,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                                modifier = Modifier.padding(top = 2.dp),
+                            )
+                        }
+                        TextButton(onClick = { viewModel.hideDuplicateCopies(listOf(g)) }) { Text(stringResource(R.string.duplicates_hide_extra)) }
+                    }
+                    HorizontalDivider()
+                }
+            }
+        }
     }
 }

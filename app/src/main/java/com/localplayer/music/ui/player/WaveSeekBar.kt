@@ -23,6 +23,7 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.graphics.StrokeJoin
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.onSizeChanged
@@ -35,7 +36,6 @@ import com.localplayer.music.ui.theme.LocalReduceMotion
 import com.localplayer.music.ui.theme.Motion
 import kotlin.math.PI
 import kotlin.math.abs
-import kotlin.math.sin
 
 /** A touch this close to the thumb grabs it (keeps the finger -> thumb offset, so the thumb never jumps). */
 private val GRAB_ZONE = 28.dp
@@ -158,17 +158,18 @@ fun WaveSeekBar(
         }
         drawCircle(color = activeColor, radius = endDotR, center = Offset(size.width - endDotR, midY))
         // Played part: wave (flat at the very start so it grows out of the baseline).
+        // The wave settles to half height as it reaches the thumb and ends at its own height there (no straight jump back to the
+        // centre line), and the joins are round: before, a crest right at the thumb made a pointed corner stick out of it.
+        val taper = 14.dp.toPx()
         val path = Path()
         var x = 0f
         path.moveTo(0f, midY)
         while (x < thumbX) {
-            val ramp = (x / wavelength).coerceAtMost(1f)
-            val y = midY + amplitude * ramp * sin((x / wavelength) * 2f * PI.toFloat() - phase)
-            path.lineTo(x, y)
+            path.lineTo(x, midY + WaveGeometry.offset(x, thumbX, wavelength, taper, amplitude, phase))
             x += 2f
         }
-        path.lineTo(thumbX, midY)
-        drawPath(path, color = activeColor, style = Stroke(width = activeW, cap = StrokeCap.Round))
+        path.lineTo(thumbX, midY + WaveGeometry.offset(thumbX, thumbX, wavelength, taper, amplitude, phase))
+        drawPath(path, color = activeColor, style = Stroke(width = activeW, cap = StrokeCap.Round, join = StrokeJoin.Round))
         drawCircle(color = activeColor, radius = thumbR * thumbScale.value, center = Offset(thumbX, midY))
     }
 }

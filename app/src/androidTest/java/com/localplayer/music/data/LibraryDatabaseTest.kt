@@ -4,7 +4,6 @@ import android.content.Context
 import androidx.room.Room
 import androidx.test.core.app.ApplicationProvider
 import androidx.test.ext.junit.runners.AndroidJUnit4
-import com.localplayer.music.data.AppSettings
 import com.localplayer.music.data.db.AppDatabase
 import com.localplayer.music.data.db.HistoryEntity
 import com.localplayer.music.data.db.SearchIndex
@@ -45,6 +44,8 @@ class LibraryDatabaseTest {
             coordinator = coordinator,
             settings = AppSettings(context),
             searchIndex = searchIndex,
+            folderAccess = com.localplayer.music.data.library.FolderAccess(context),
+            playlistCovers = com.localplayer.music.data.artwork.PlaylistCoverStore(context),
         )
     }
 
@@ -138,7 +139,12 @@ class LibraryDatabaseTest {
         assertEquals(2, repo.artists().first().single().trackCount)
 
         repo.setPrimaryArtist(a, "Artist B")
-        assertEquals(setOf("Artist A", "Artist B"), repo.artists().first().map { it.name }.toSet())
+        val afterOverride = repo.artists().first().associateBy { it.key }
+        // The original-cased spelling moved to Artist B with the overridden track. The remaining
+        // Artist A group therefore displays the spelling of its one remaining track.
+        assertEquals(setOf("artist a", "artist b"), afterOverride.keys)
+        assertEquals(1, afterOverride.getValue("artist a").trackCount)
+        assertEquals(1, afterOverride.getValue("artist b").trackCount)
         // The cached file artist credit is untouched.
         assertEquals("Artist A feat. Artist B", db.trackDao().getEntityByUri(a)!!.artist)
 

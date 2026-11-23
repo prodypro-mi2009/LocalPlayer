@@ -1,5 +1,6 @@
 package com.localplayer.music.ui
 
+import androidx.core.net.toUri
 import android.content.IntentSender
 import android.net.Uri
 import androidx.lifecycle.ViewModel
@@ -8,6 +9,9 @@ import com.localplayer.music.AppContainer
 import com.localplayer.music.R
 import com.localplayer.music.data.db.TrackListItem
 import androidx.compose.ui.graphics.asImageBitmap
+import com.localplayer.music.data.effects.Ebur128
+import com.localplayer.music.data.effects.LoudnessAnalyzer
+import kotlinx.coroutines.flow.first
 import com.localplayer.music.data.metadata.ArtworkChange
 import com.localplayer.music.data.metadata.CoverImage
 import com.localplayer.music.data.metadata.FailureKind
@@ -87,6 +91,9 @@ class EditMetadataViewModel(
         viewModelScope.launch { reloadFromFile() }
     }
 
+    /** Re-reads the file (used when lyrics were saved from another screen, e.g. the internet search). */
+    fun reload() = load()
+
     /** (Re)reads the REAL tags of the file. Also used after a save so the screen never shows stale data. */
     private suspend fun reloadFromFile() {
         run {
@@ -146,11 +153,18 @@ class EditMetadataViewModel(
             return
         }
         val changes = MetadataValidation.changesFrom(original, current.values)
-        if (changes.isEmpty()) {
+        // One Save writes the text fields and the cover together (one verified write).
+        val picked = _cover.value
+        val artwork = when {
+            picked != null -> ArtworkChange.Set(picked.prepared.bytes, picked.prepared.mimeType, picked.prepared.width, picked.prepared.height)
+            _coverRemoved.value -> ArtworkChange.Remove
+            else -> null
+        }
+        if (changes.isEmpty() && artwork == null) {
             _state.value = current.copy(noChanges = true)
             return
         }
-        viewModelScope.launch { proceed(changes) }
+        viewModelScope.launch { proceed(changes, artwork) }
     }
 
     /** Cover picture chosen by the user and already prepared (JPEG), shown as a preview before saving. */
@@ -158,6 +172,80 @@ class EditMetadataViewModel(
 
     private val _cover = MutableStateFlow<CoverChoice?>(null)
     val cover: StateFlow<CoverChoice?> = _cover.asStateFlow()
+
+    private class GainResult(val trackGain: String?, val albumGain: String?, val trackPeak: String?, val albumPeak: String?, val float: Boolean)
+
+    private val _precision = MutableStateFlow<Boolean?>(null)
+    /** After "Find ReplayGain": true = measured with float samples (true peak), false = 16-bit (peak is a lower limit). */
+    val precision: StateFlow<Boolean?> = _precision.asStateFlow()
+
+    private val _finding = MutableStateFlow(false)
+    /** True while the loudness of this song (and its album) is being measured. */
+    val finding: StateFlow<Boolean> = _finding.asStateFlow()
+
+    /**
+     * Measures the loudness of this song and of every song of its album and fills the two ReplayGain fields. Nothing is
+     * written to the file until the user presses Save (which goes through the normal verified write).
+     */
+    fun findGain() {
+        val uri = trackUri ?: return
+        val track = _state.value.track ?: return
+        if (_finding.value || !_state.value.canEdit) return
+        _finding.value = true
+        viewModelScope.launch {
+            try {
+                val job = kotlin.coroutines.coroutineContext[kotlinx.coroutines.Job]
+                val active = { job?.isActive != false }
+                val context = container.appContext
+                val result = withContext(kotlinx.coroutines.Dispatchers.Default) {
+                    val own = LoudnessAnalyzer.analyze(context, uri.toUri(), active) ?: return@withContext null
+                    val albumKey = track.albumGroupKey
+                    val others = if (albumKey.isNullOrBlank()) emptyList() else container.library.albumTracks(albumKey).first()
+                    val blocks = ArrayList<DoubleArray>()
+                    blocks.add(own.blocks)
+                    var otherPeaks = 0f
+                    var allFloat = own.floatSamples
+                    val wholeAlbum = others.size <= MAX_ALBUM_SONGS
+                    if (wholeAlbum) {
+                        for (other in others) {
+                            if (other.id == trackId) continue
+                            LoudnessAnalyzer.analyze(context, other.uri.toUri(), active)?.let {
+                                blocks.add(it.blocks)
+                                if (it.peak > otherPeaks) otherPeaks = it.peak
+                                if (!it.floatSamples) allFloat = false
+                            }
+                        }
+                    }
+                    var albumPeak = own.peak
+                    if (wholeAlbum) albumPeak = maxOf(albumPeak, otherPeaks)
+                    GainResult(
+                        LoudnessAnalyzer.gainText(own.integratedLufs),
+                        if (wholeAlbum) LoudnessAnalyzer.gainText(Ebur128.integrated(blocks)) else null,
+                        LoudnessAnalyzer.peakText(own.peak),
+                        if (wholeAlbum) LoudnessAnalyzer.peakText(albumPeak) else null,
+                        allFloat,
+                    )
+                }
+                val trackGain = result?.trackGain
+                val albumGain = result?.albumGain
+                if (trackGain == null) {
+                    _state.value = _state.value.copy(issue = EditIssue(FailureKind.UNKNOWN, "The loudness of this song could not be measured."))
+                } else {
+                    _precision.value = result.float
+                    onValueChange(MetadataField.REPLAYGAIN_TRACK, trackGain)
+                    albumGain?.let { onValueChange(MetadataField.REPLAYGAIN_ALBUM, it) }
+                    result.trackPeak?.let { onValueChange(MetadataField.REPLAYGAIN_TRACK_PEAK, it) }
+                    result.albumPeak?.let { onValueChange(MetadataField.REPLAYGAIN_ALBUM_PEAK, it) }
+                }
+            } finally {
+                _finding.value = false
+            }
+        }
+    }
+
+    private val _coverRemoved = MutableStateFlow(false)
+    /** True after "Remove cover": the picture is only deleted from the file when the user presses Save. */
+    val coverRemoved: StateFlow<Boolean> = _coverRemoved.asStateFlow()
 
     /** Decodes the picked picture; shows [EditIssue] (INVALID_INPUT) when it cannot be read. */
     fun chooseCover(uri: Uri) {
@@ -172,30 +260,23 @@ class EditMetadataViewModel(
                 _state.value = _state.value.copy(issue = EditIssue(FailureKind.INVALID_INPUT, "The picture could not be read."))
             } else {
                 _cover.value = choice
+                _coverRemoved.value = false
                 _state.value = _state.value.copy(issue = null)
             }
         }
     }
 
+    /** Forgets the chosen picture and the pending removal: the cover stays as it is in the file. */
     fun clearCoverChoice() {
         _cover.value = null
+        _coverRemoved.value = false
     }
 
-    /** Writes the chosen picture as the only embedded cover (verified by reading the file back). */
-    fun saveCover() {
-        val choice = _cover.value ?: return
-        startArtworkSave(
-            ArtworkChange.Set(choice.prepared.bytes, choice.prepared.mimeType, choice.prepared.width, choice.prepared.height),
-        )
-    }
-
-    /** Removes every embedded picture from the file. */
-    fun removeCover() = startArtworkSave(ArtworkChange.Remove)
-
-    private fun startArtworkSave(change: ArtworkChange) {
-        val current = _state.value
-        if (!current.canEdit || current.saving) return
-        viewModelScope.launch { proceed(emptyMap(), change) }
+    /** Marks the embedded cover for removal (done on Save). */
+    fun removeCover() {
+        _cover.value = null
+        _coverRemoved.value = true
+        _state.value = _state.value.copy(noChanges = false)
     }
 
     private suspend fun proceed(changes: MetadataChanges, artwork: ArtworkChange? = null) {
@@ -205,7 +286,7 @@ class EditMetadataViewModel(
             return
         }
         _state.value = _state.value.copy(saving = true, issue = null, noChanges = false)
-        when (val access = repository.checkWriteAccess(Uri.parse(uri))) {
+        when (val access = repository.checkWriteAccess(uri.toUri())) {
             WriteAccess.Granted -> write(changes, artwork)
             is WriteAccess.NeedsConsent -> {
                 pendingChanges = changes
@@ -233,7 +314,7 @@ class EditMetadataViewModel(
         }
         viewModelScope.launch {
             val uri = trackUri ?: return@launch fail(FailureKind.FILE_UNAVAILABLE, "")
-            when (val access = repository.checkWriteAccess(Uri.parse(uri))) {
+            when (val access = repository.checkWriteAccess(uri.toUri())) {
                 WriteAccess.Granted -> write(changes, artwork)
                 is WriteAccess.Denied -> fail(access.kind, access.detail)
                 else -> fail(FailureKind.WRITE_PERMISSION_DENIED, "")
@@ -246,7 +327,7 @@ class EditMetadataViewModel(
         val handle = player.beginFileEdit(mediaId)
         try {
             repository.save(trackId, changes, artwork)
-            if (artwork != null) _cover.value = null
+            if (artwork != null) clearCoverChoice()
             // Fresh item built from the refreshed cache, so queue + notification show the new tags.
             player.finishFileEdit(handle, mediaId, freshMediaItem())
             // Re-read what is REALLY in the file now, so reopening shows the saved content and a second save
@@ -273,5 +354,9 @@ class EditMetadataViewModel(
 
     private fun fail(kind: FailureKind, detail: String) {
         _state.value = _state.value.copy(saving = false, issue = EditIssue(kind, detail))
+    }
+
+    private companion object {
+        const val MAX_ALBUM_SONGS = 80
     }
 }

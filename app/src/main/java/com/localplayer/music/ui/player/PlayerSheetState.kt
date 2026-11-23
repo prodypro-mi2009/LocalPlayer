@@ -174,6 +174,8 @@ class PlayerSheetState(
  * Creates the shared sheet state. The extent is the window height, so "closed" is always completely off screen.
  * If the extent changes (rotation) a new state keeps the current open / closed target and re-snaps.
  */
+// The configuration height stays as a floor: the window size can still read 0 on the very first frame.
+@Suppress("ConfigurationScreenWidthHeight")
 @Composable
 fun rememberPlayerSheetState(initiallyOpen: Boolean): PlayerSheetState {
     val density = LocalDensity.current

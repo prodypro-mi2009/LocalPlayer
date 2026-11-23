@@ -53,9 +53,9 @@ class MetadataReader(private val context: Context) {
                 albumArtist = tag(MediaMetadataRetriever.METADATA_KEY_ALBUMARTIST),
                 album = tag(MediaMetadataRetriever.METADATA_KEY_ALBUM),
                 genre = tag(MediaMetadataRetriever.METADATA_KEY_GENRE),
-                year = parseYear(yearText),
-                trackNumber = parseLeadingInt(tag(MediaMetadataRetriever.METADATA_KEY_CD_TRACK_NUMBER)),
-                discNumber = parseLeadingInt(tag(MediaMetadataRetriever.METADATA_KEY_DISC_NUMBER)),
+                year = TrackIndexing.parseYear(yearText),
+                trackNumber = TrackIndexing.parseLeadingInt(tag(MediaMetadataRetriever.METADATA_KEY_CD_TRACK_NUMBER)),
+                discNumber = TrackIndexing.parseLeadingInt(tag(MediaMetadataRetriever.METADATA_KEY_DISC_NUMBER)),
                 durationMs = tag(MediaMetadataRetriever.METADATA_KEY_DURATION)?.toLongOrNull() ?: 0L,
                 hasArtwork = artwork,
             )
@@ -69,14 +69,4 @@ class MetadataReader(private val context: Context) {
             }
         }
     }
-
-    private fun parseYear(text: String?): Int? {
-        if (text == null) return null
-        val match = Regex("(\\d{4})").find(text) ?: return null
-        return match.value.toIntOrNull()
-    }
-
-    /** "3/12" -> 3, "03" -> 3, garbage -> null. */
-    private fun parseLeadingInt(text: String?): Int? =
-        text?.substringBefore('/')?.trim()?.toIntOrNull()
 }

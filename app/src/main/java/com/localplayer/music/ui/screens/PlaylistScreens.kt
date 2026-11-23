@@ -2,7 +2,6 @@ package com.localplayer.music.ui.screens
 
 import androidx.compose.foundation.gestures.scrollBy
 import kotlinx.coroutines.isActive
-import androidx.compose.foundation.lazy.LazyItemScope
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.zIndex
 import androidx.compose.ui.semantics.semantics
@@ -12,7 +11,6 @@ import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.background
 import com.localplayer.music.ui.components.FadingLazyColumn
 
-import com.localplayer.music.ui.components.barInsetBelowKeyboard
 import androidx.compose.foundation.clickable
 import androidx.compose.ui.draw.clip
 import androidx.compose.foundation.layout.Arrangement
@@ -22,21 +20,15 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material3.Button
 import androidx.compose.material3.Checkbox
-import androidx.compose.material3.DropdownMenu
-import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedButton
-import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -54,7 +46,9 @@ import com.localplayer.music.R
 import com.localplayer.music.data.library.TextNormalizer
 import com.localplayer.music.playback.ArtworkRef
 import com.localplayer.music.ui.LibraryViewModel
+import com.localplayer.music.ui.components.AppDropdownMenu
 import com.localplayer.music.ui.components.AppIcons
+import com.localplayer.music.ui.components.AppMenuItem
 import com.localplayer.music.ui.components.ArtworkImage
 import com.localplayer.music.ui.components.ConfirmDialog
 import com.localplayer.music.ui.components.DetailTopBar
@@ -65,7 +59,6 @@ import com.localplayer.music.ui.components.SongMenuController
 import com.localplayer.music.ui.components.TrackRow
 import com.localplayer.music.ui.components.artworkRef
 import com.localplayer.music.ui.components.ArtworkCollage
-import com.localplayer.music.ui.components.BottomBackButton
 import com.localplayer.music.ui.components.DetailHero
 import com.localplayer.music.ui.components.songCountText
 import com.localplayer.music.ui.nav.NavState
@@ -144,6 +137,10 @@ fun PlaylistScreen(screen: Screen.Playlist, nav: NavState, viewModel: LibraryVie
     ) { uri -> if (uri != null) viewModel.setPlaylistCover(screen.id, uri) }
     val list = tracks.orEmpty()
     val name = playlist?.name.orEmpty()
+    // Save the playlist as .m3u: the system "save as" dialog; nothing is written until the user picks a place.
+    val m3uSaver = androidx.activity.compose.rememberLauncherForActivityResult(
+        androidx.activity.result.contract.ActivityResultContracts.CreateDocument("audio/x-mpegurl"),
+    ) { uri -> if (uri != null) viewModel.exportPlaylistM3u(screen.id, uri) }
 
     // "Edit order" mode: rows get a drag handle (and a remove button); everything else is as in a normal list.
     var editing by remember { mutableStateOf(false) }
@@ -230,44 +227,37 @@ fun PlaylistScreen(screen: Screen.Playlist, nav: NavState, viewModel: LibraryVie
                     IconButton(onClick = { menuOpen = true }) {
                         Icon(AppIcons.MoreVert, contentDescription = stringResource(R.string.more_options))
                     }
-                    DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
+                    AppDropdownMenu(expanded = menuOpen, onDismiss = { menuOpen = false }) {
                         if (list.size > 1 || editing) {
-                            DropdownMenuItem(
-                                text = { Text(stringResource(if (editing) R.string.done_editing_order else R.string.edit_order)) },
-                                onClick = { menuOpen = false; editing = !editing },
+                            AppMenuItem(AppIcons.DragHandle, stringResource(if (editing) R.string.done_editing_order else R.string.edit_order)) {
+                                menuOpen = false; editing = !editing
+                            }
+                        }
+                        AppMenuItem(AppIcons.Image, stringResource(R.string.edit_playlist_cover)) {
+                            menuOpen = false
+                            coverPicker.launch(
+                                androidx.activity.result.PickVisualMediaRequest(
+                                    androidx.activity.result.contract.ActivityResultContracts.PickVisualMedia.ImageOnly,
+                                ),
                             )
                         }
-                        DropdownMenuItem(
-                            text = { Text(stringResource(R.string.edit_playlist_cover)) },
-                            onClick = {
-                                menuOpen = false
-                                coverPicker.launch(
-                                    androidx.activity.result.PickVisualMediaRequest(
-                                        androidx.activity.result.contract.ActivityResultContracts.PickVisualMedia.ImageOnly,
-                                    ),
-                                )
-                            },
-                        )
                         if (playlist?.coverFile != null) {
-                            DropdownMenuItem(
-                                text = { Text(stringResource(R.string.remove_playlist_cover)) },
-                                onClick = { menuOpen = false; viewModel.removePlaylistCover(screen.id) },
-                            )
+                            AppMenuItem(AppIcons.Close, stringResource(R.string.remove_playlist_cover)) {
+                                menuOpen = false; viewModel.removePlaylistCover(screen.id)
+                            }
                         }
-                        DropdownMenuItem(
-                            text = { Text(stringResource(R.string.rename)) },
-                            onClick = { menuOpen = false; renaming = true },
-                        )
+                        if (list.isNotEmpty()) {
+                            AppMenuItem(AppIcons.Upload, stringResource(R.string.m3u_export)) {
+                                menuOpen = false; m3uSaver.launch(name.ifBlank { "Playlist" } + ".m3u")
+                            }
+                        }
+                        AppMenuItem(AppIcons.Edit, stringResource(R.string.rename)) { menuOpen = false; renaming = true }
                         if (playlist?.isFolderLinked == true) {
-                            DropdownMenuItem(
-                                text = { Text(stringResource(R.string.unlink_from_folder)) },
-                                onClick = { menuOpen = false; viewModel.unlinkPlaylistFromFolder(screen.id) },
-                            )
+                            AppMenuItem(AppIcons.Folder, stringResource(R.string.unlink_from_folder)) {
+                                menuOpen = false; viewModel.unlinkPlaylistFromFolder(screen.id)
+                            }
                         }
-                        DropdownMenuItem(
-                            text = { Text(stringResource(R.string.delete)) },
-                            onClick = { menuOpen = false; deleting = true },
-                        )
+                        AppMenuItem(AppIcons.Delete, stringResource(R.string.delete)) { menuOpen = false; deleting = true }
                     }
                 }
             },
@@ -305,8 +295,9 @@ fun PlaylistScreen(screen: Screen.Playlist, nav: NavState, viewModel: LibraryVie
                     // A playlist that mirrors a folder is edited by changing the folder (or by unlinking it).
                     FolderLinkBanner(linked)
                 } else {
-                    OutlinedButton(
+                    androidx.compose.material3.FilledTonalButton(
                         onClick = { nav.push(Screen.AddTracks(screen.id)) },
+                        colors = com.localplayer.music.ui.theme.tonalButtonColors(),
                         modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp),
                     ) {
                         Icon(AppIcons.Add, contentDescription = null, modifier = Modifier.size(20.dp))
@@ -364,7 +355,6 @@ fun PlaylistScreen(screen: Screen.Playlist, nav: NavState, viewModel: LibraryVie
             }
         }
     }
-    BottomBackButton(onBack = { nav.pop() }, modifier = Modifier.align(Alignment.BottomStart).padding(start = 12.dp, bottom = 8.dp))
     }
     if (renaming) {
         NameDialog(
@@ -411,30 +401,39 @@ fun AddTracksScreen(screen: Screen.AddTracks, nav: NavState, viewModel: LibraryV
     }
 
     Column(Modifier.fillMaxSize()) {
-        DetailTopBar(title = stringResource(R.string.add_tracks), onBack = { nav.pop() })
-        OutlinedTextField(
+        // Same look as the settings pages: large title, filled search field, rounded cards.
+        com.localplayer.music.ui.components.SettingsTopBar(title = stringResource(R.string.add_tracks), onBack = { nav.pop() })
+        com.localplayer.music.ui.components.FilledField(
             value = filter,
             onValueChange = { filter = it },
-            singleLine = true,
-            placeholder = { Text(stringResource(R.string.search_hint)) },
+            label = stringResource(R.string.search_hint),
             modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp),
         )
-        FadingLazyColumn(Modifier.weight(1f)) {
+        Box(Modifier.weight(1f)) {
+        FadingLazyColumn(
+            Modifier.fillMaxSize(),
+            contentPadding = barPadding(extra = 72.dp, horizontal = 16.dp, top = 4.dp),
+        ) {
             items(visible, key = { it.id }) { song ->
                 val already = song.uri in existing
                 val checked = already || song.uri in selected
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
+                        .padding(vertical = 3.dp)
+                        .clip(androidx.compose.foundation.shape.RoundedCornerShape(18.dp))
+                        .background(
+                            if (checked) MaterialTheme.colorScheme.surfaceContainerHigh else MaterialTheme.colorScheme.surfaceContainerLow,
+                        )
                         .clickable(enabled = !already) {
                             if (song.uri in selected) selected.remove(song.uri) else selected.add(song.uri)
                         }
-                        .padding(horizontal = 16.dp, vertical = 6.dp),
+                        .padding(start = 6.dp, end = 12.dp, top = 6.dp, bottom = 6.dp),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
-                    Checkbox(checked = checked, onCheckedChange = null, enabled = !already)
-                    Spacer(Modifier.width(12.dp))
-                    ArtworkImage(artwork = song.artworkRef(), size = 40.dp)
+                    Checkbox(checked = checked, onCheckedChange = null, enabled = !already, modifier = Modifier.padding(start = 6.dp))
+                    Spacer(Modifier.width(10.dp))
+                    ArtworkImage(artwork = song.artworkRef(), size = 44.dp)
                     Spacer(Modifier.width(12.dp))
                     Column(Modifier.weight(1f)) {
                         Text(song.title, style = MaterialTheme.typography.bodyLarge, maxLines = 1, overflow = TextOverflow.Ellipsis)
@@ -449,7 +448,8 @@ fun AddTracksScreen(screen: Screen.AddTracks, nav: NavState, viewModel: LibraryV
                 }
             }
         }
-        Button(
+        com.localplayer.music.ui.components.ActionPill(
+            label = stringResource(R.string.add_selected, selected.size),
             onClick = {
                 val target = playlist
                 if (target != null) {
@@ -458,9 +458,9 @@ fun AddTracksScreen(screen: Screen.AddTracks, nav: NavState, viewModel: LibraryV
                 nav.pop()
             },
             enabled = selected.isNotEmpty() && playlist != null,
-            modifier = Modifier.fillMaxWidth().padding(start = 16.dp, top = 16.dp, end = 16.dp, bottom = 16.dp + barInsetBelowKeyboard()),
-        ) {
-            Text(stringResource(R.string.add_selected, selected.size))
+            visible = selected.isNotEmpty(),
+            modifier = Modifier.align(Alignment.BottomCenter),
+        )
         }
     }
 }

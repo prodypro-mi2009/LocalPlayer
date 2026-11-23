@@ -119,9 +119,8 @@ object QueueOps {
         if (p.currentMediaItemIndex < 0 || first >= count) return
         val items = (first until count).map { p.getMediaItemAt(it) }
         if (items.none { MediaItemFactory.rank(it) >= 0 }) return
-        val plain = items.map { MediaItemFactory.playable(it) }
-        if (plain.any { it == null }) return
-        p.replaceMediaItems(first, count, plain.map { MediaItemFactory.withoutRank(it!!) })
+        val plain = items.map { MediaItemFactory.playable(it) ?: return }
+        p.replaceMediaItems(first, count, plain.map { MediaItemFactory.withoutRank(it) })
     }
 
     /**

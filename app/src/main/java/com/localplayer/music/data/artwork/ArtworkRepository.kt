@@ -1,5 +1,6 @@
 package com.localplayer.music.data.artwork
 
+import androidx.core.net.toUri
 import android.content.Context
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
@@ -23,7 +24,11 @@ import kotlin.math.roundToInt
 class ArtworkRepository(private val context: Context) {
 
     private val diskDir = File(context.cacheDir, "artwork").apply { mkdirs() }
-    private val ioDispatcher = Dispatchers.IO.limitedParallelism(2)
+    /** Reading a small cached thumbnail is quick: several at once, so a screen full of covers fills in fast at app start. */
+    private val diskDispatcher = Dispatchers.IO.limitedParallelism(4)
+
+    /** Pulling a picture out of a music file is slow and heavy on memory: only a few at once. */
+    private val extractDispatcher = Dispatchers.IO.limitedParallelism(2)
     /** Keys whose file was read fine and really has no (decodable) embedded picture. The key includes lastModified. */
     private val missing: MutableSet<String> = ConcurrentHashMap.newKeySet()
 
@@ -56,6 +61,23 @@ class ArtworkRepository(private val context: Context) {
     fun peek(trackId: Long, lastModified: Long, targetPx: Int): Bitmap? =
         memoryCache.get(cacheKey(trackId, lastModified, bucketFor(targetPx)))
 
+    /**
+     * Memory or disk cache only (never reads the music file): a quick, smaller picture to show while the big one loads.
+     * Returns null when this size has not been saved yet.
+     */
+    suspend fun loadCached(trackId: Long, lastModified: Long, targetPx: Int): Bitmap? {
+        val bucket = bucketFor(targetPx)
+        val key = cacheKey(trackId, lastModified, bucket)
+        memoryCache.get(key)?.let { return it }
+        return withContext(diskDispatcher) {
+            memoryCache.get(key)?.let { return@withContext it }
+            val file = File(diskDir, "$key.jpg")
+            val decoded = if (file.exists()) decodeFile(file, bucket) else null
+            if (decoded != null) memoryCache.put(key, decoded)
+            decoded
+        }
+    }
+
     suspend fun load(trackId: Long, sourceUri: String, lastModified: Long, targetPx: Int): Bitmap? {
         val bucket = bucketFor(targetPx)
         val key = cacheKey(trackId, lastModified, bucket)
@@ -64,16 +86,24 @@ class ArtworkRepository(private val context: Context) {
         val previous = failures[key]
         if (previous != null && !ArtworkRetryPolicy.mayRetry(previous, System.currentTimeMillis())) return null
 
-        return withContext(ioDispatcher) {
+        val file = File(diskDir, "$key.jpg")
+        val cached = withContext(diskDispatcher) {
             memoryCache.get(key)?.let { return@withContext it }
-            val file = File(diskDir, "$key.jpg")
-            var bitmap: Bitmap? = if (file.exists()) decodeFile(file, bucket) else null
-            if (bitmap != null) {
-                memoryCache.put(key, bitmap)
+            val decoded = if (file.exists()) decodeFile(file, bucket) else null
+            if (decoded != null) {
+                memoryCache.put(key, decoded)
                 failures.remove(key)
-                return@withContext bitmap
+                // The disk cache drops the oldest files first: a cover in use must not look old.
+                if (System.currentTimeMillis() - file.lastModified() > TOUCH_AFTER_MS) file.setLastModified(System.currentTimeMillis())
             }
-            when (val result = extract(Uri.parse(sourceUri), bucket)) {
+            decoded
+        }
+        if (cached != null) return cached
+
+        return withContext(extractDispatcher) {
+            memoryCache.get(key)?.let { return@withContext it }
+            var bitmap: Bitmap? = null
+            when (val result = extract(sourceUri.toUri(), bucket)) {
                 is Extracted.Found -> {
                     bitmap = result.bitmap
                     writeFile(file, bitmap)
@@ -198,5 +228,6 @@ class ArtworkRepository(private val context: Context) {
     private companion object {
         /** Upper bound for the in-memory miss/failure bookkeeping. */
         const val MAX_TRACKED = 4000
+        const val TOUCH_AFTER_MS = 24L * 60 * 60 * 1000
     }
 }

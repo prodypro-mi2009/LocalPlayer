@@ -7,7 +7,6 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
@@ -15,7 +14,6 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import com.localplayer.music.ui.components.AppIcons
 import com.localplayer.music.ui.components.AppTopBar
-import com.localplayer.music.ui.components.TopBarMetrics
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -27,8 +25,10 @@ import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
+import com.localplayer.music.ui.components.topFade
+import com.localplayer.music.ui.components.AppBackButton
+import com.localplayer.music.ui.components.SettingsTopBar
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
@@ -38,7 +38,6 @@ import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.unit.dp
 import com.localplayer.music.R
 import com.localplayer.music.ui.LibraryViewModel
-import com.localplayer.music.ui.components.DetailTopBar
 import com.localplayer.music.ui.components.LocalBottomBarInset
 import com.localplayer.music.ui.nav.NavState
 import com.localplayer.music.ui.nav.Screen
@@ -49,8 +48,8 @@ import com.localplayer.music.ui.nav.Screen
  * Each entry opens its own sub-screen, so nothing is dumped flat here.
  */
 @Composable
-fun SettingsScreen(nav: NavState, @Suppress("UNUSED_PARAMETER") viewModel: LibraryViewModel) {
-    val entries = listOf(
+fun SettingsScreen(nav: NavState, viewModel: LibraryViewModel) {
+    val entries = listOfNotNull(
         SettingsEntry(R.string.settings_appearance, R.string.settings_card_appearance, AppIcons.Palette, Color(0xFF8A4F6B)) { nav.push(Screen.SettingsAppearance) },
         SettingsEntry(R.string.settings_language, R.string.settings_card_language, AppIcons.Language, Color(0xFF1E5E8C)) { nav.push(Screen.SettingsLanguage) },
         SettingsEntry(R.string.settings_library, R.string.settings_card_library, AppIcons.Folder, Color(0xFF0B5C80)) { nav.push(Screen.SettingsLibrary) },
@@ -61,17 +60,17 @@ fun SettingsScreen(nav: NavState, @Suppress("UNUSED_PARAMETER") viewModel: Libra
         SettingsEntry(R.string.settings_audio, R.string.settings_card_audio, AppIcons.GraphicEq, Color(0xFF7A5A12)) { nav.push(Screen.SettingsAudio) },
         SettingsEntry(R.string.settings_widgets, R.string.settings_card_widgets, AppIcons.Widgets, Color(0xFF2F6B4A)) { nav.push(Screen.SettingsWidgets) },
         SettingsEntry(R.string.dl_title, R.string.settings_card_download, AppIcons.Download, Color(0xFFB23A3A)) { nav.push(Screen.SettingsDownload) },
+        SettingsEntry(R.string.spotify_title, R.string.settings_card_spotify, AppIcons.MusicNote, Color(0xFF1E7A45)) { nav.push(Screen.SettingsSpotify) },
+        if (com.localplayer.music.jam.JamSwitch.ENABLED) {
+            SettingsEntry(R.string.jam_title, R.string.settings_card_jam, AppIcons.Cast, Color(0xFF2A7A8C)) { nav.push(Screen.SettingsJam) }
+        } else null,
         SettingsEntry(R.string.settings_backup, R.string.settings_card_backup, AppIcons.CloudUpload, Color(0xFF3A4A80)) { nav.push(Screen.SettingsBackup) },
         SettingsEntry(R.string.settings_about, R.string.settings_card_about, AppIcons.Info, Color(0xFF4A5560)) { nav.push(Screen.SettingsAbout) },
     )
     Column(Modifier.fillMaxSize()) {
         AppTopBar(
             leading = {
-                Surface(shape = CircleShape, color = MaterialTheme.colorScheme.surfaceContainerHighest.copy(alpha = 0.8f)) {
-                    IconButton(onClick = { nav.pop() }, modifier = Modifier.size(TopBarMetrics.ButtonSize)) {
-                        Icon(AppIcons.ArrowBack, contentDescription = stringResource(R.string.back))
-                    }
-                }
+                AppBackButton(onClick = { nav.pop() })
                 Text(
                     text = stringResource(R.string.settings),
                     style = MaterialTheme.typography.headlineMedium,
@@ -81,8 +80,9 @@ fun SettingsScreen(nav: NavState, @Suppress("UNUSED_PARAMETER") viewModel: Libra
                 )
             },
         )
+        val scrollState = rememberScrollState()
         Column(
-            Modifier.verticalScroll(rememberScrollState()).padding(horizontal = 16.dp, vertical = 8.dp),
+            Modifier.topFade(scrollState).verticalScroll(scrollState).padding(horizontal = 16.dp, vertical = 8.dp),
             verticalArrangement = Arrangement.spacedBy(2.dp),
         ) {
             entries.forEachIndexed { i, e -> SettingsRow(e, position = i, count = entries.size) }
@@ -141,9 +141,10 @@ internal fun SettingsRow(entry: SettingsEntry, position: Int, count: Int) {
 @Composable
 internal fun SettingsHub(title: Int, nav: NavState, entries: List<SettingsEntry>) {
     Column(Modifier.fillMaxSize()) {
-        DetailTopBar(title = stringResource(title), onBack = { nav.pop() })
+        SettingsTopBar(stringResource(title)) { nav.pop() }
+        val scrollState = rememberScrollState()
         Column(
-            Modifier.verticalScroll(rememberScrollState()).padding(horizontal = 16.dp, vertical = 8.dp),
+            Modifier.topFade(scrollState).verticalScroll(scrollState).padding(horizontal = 16.dp, vertical = 8.dp),
             verticalArrangement = Arrangement.spacedBy(2.dp),
         ) {
             entries.forEachIndexed { i, e -> SettingsRow(e, position = i, count = entries.size) }
@@ -159,5 +160,7 @@ fun NavigationHubScreen(nav: NavState) = SettingsHub(
     listOf(
         SettingsEntry(R.string.settings_tab_order, R.string.settings_card_tab_order, AppIcons.Tab, Color(0xFF4A5FA8)) { nav.push(Screen.SettingsTabOrder) },
         SettingsEntry(R.string.settings_gestures, R.string.settings_card_gestures, AppIcons.Gesture, Color(0xFF8A4A9A)) { nav.push(Screen.SettingsGestures) },
+        SettingsEntry(R.string.settings_back_button, R.string.settings_card_back_button, AppIcons.ArrowBack, Color(0xFF3F8F7A)) { nav.push(Screen.SettingsBackButton) },
+        SettingsEntry(R.string.settings_action_row, R.string.settings_card_action_row, AppIcons.Shuffle, Color(0xFFB0703A)) { nav.push(Screen.SettingsActionRow) },
     ),
 )

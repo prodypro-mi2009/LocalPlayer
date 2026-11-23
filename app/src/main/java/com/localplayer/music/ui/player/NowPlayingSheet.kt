@@ -3,12 +3,9 @@ package com.localplayer.music.ui.player
 import com.localplayer.music.ui.theme.onColorFor
 import com.localplayer.music.ui.theme.controlColor
 import com.localplayer.music.data.personalization.ControlColorGroup
-import androidx.compose.material3.IconButtonDefaults
 import com.localplayer.music.ui.theme.albumGenreFont
 import com.localplayer.music.ui.theme.artistFont
 import com.localplayer.music.ui.theme.songTitleFont
-import androidx.compose.material3.DropdownMenuItem
-import androidx.compose.material3.DropdownMenu
 import androidx.activity.compose.BackHandler
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.SizeTransform
@@ -17,6 +14,7 @@ import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.animation.core.snap
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
+import androidx.compose.foundation.gestures.waitForUpOrCancellation
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.ui.input.pointer.PointerEventPass
 import androidx.compose.ui.geometry.Offset
@@ -25,7 +23,6 @@ import com.localplayer.music.ui.theme.SheetMorph
 import androidx.compose.ui.input.nestedscroll.NestedScrollConnection
 import androidx.compose.ui.input.nestedscroll.NestedScrollSource
 import androidx.compose.ui.input.nestedscroll.nestedScroll
-import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.Velocity
 import androidx.compose.animation.togetherWith
@@ -35,6 +32,7 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.fillMaxSize
@@ -53,11 +51,10 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.clickable
 import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.FilledIconButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -71,17 +68,22 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import androidx.lifecycle.repeatOnLifecycle
 import androidx.media3.common.Player
 import com.localplayer.music.R
 import com.localplayer.music.playback.NowPlaying
-import com.localplayer.music.playback.PlayerState
 import com.localplayer.music.playback.SleepTimerState
 import com.localplayer.music.ui.LibraryViewModel
 import com.localplayer.music.ui.components.AppIcons
@@ -93,12 +95,11 @@ import com.localplayer.music.ui.theme.Motion
 import com.localplayer.music.ui.theme.SheetPhysics
 import com.localplayer.music.ui.theme.pressScale
 import com.localplayer.music.ui.theme.rememberHaptics
-import com.localplayer.music.ui.theme.artworkVerticalBrush
+import com.localplayer.music.ui.theme.nowPlayingVerticalBrush
 import com.localplayer.music.util.formatDuration
 import android.os.SystemClock
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.foundation.LocalIndication
-import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.ui.draw.clip
@@ -110,6 +111,7 @@ import androidx.compose.runtime.snapshotFlow
 import com.localplayer.music.ui.theme.QueueSheetMotion
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.drop
+import kotlinx.coroutines.flow.filter
 import kotlinx.coroutines.delay
 
 /**
@@ -144,6 +146,8 @@ fun NowPlayingScreen(
     miniBottomPx: () -> Float,
     viewModel: LibraryViewModel,
     tone: Color?,
+    blurMode: Boolean,
+    blurred: androidx.compose.ui.graphics.ImageBitmap?,
     sheet: PlayerSheetState,
     onDismiss: () -> Unit,
     onOpenQueue: () -> Unit,
@@ -151,6 +155,7 @@ fun NowPlayingScreen(
     onMenuAction: (NowPlayingAction, NowPlaying) -> Unit,
 ) {
     val state by viewModel.playerState.collectAsStateWithLifecycle()
+    val jamProposal by viewModel.jamProposal.collectAsStateWithLifecycle()
     // Keep showing the last track while the screen slides out after the queue was cleared.
     var lastNow by remember { mutableStateOf<NowPlaying?>(null) }
     state.nowPlaying?.let { lastNow = it }
@@ -179,8 +184,9 @@ fun NowPlayingScreen(
     val reduceMotion = LocalReduceMotion.current
     val sleepState by viewModel.sleepTimerState.collectAsStateWithLifecycle()
     var sleepDialog by remember { mutableStateOf(false) }
-    val specs by produceState<String?>(initialValue = null, now.uri) {
-        value = now.uri?.let { viewModel.audioSpecsText(it) }
+    val hideChip by viewModel.settings.hideFileInfoChip.collectAsStateWithLifecycle()
+    val specs by produceState<String?>(initialValue = null, now.uri, hideChip) {
+        value = if (hideChip) null else now.uri?.let { viewModel.audioSpecsText(it) }
     }
 
     // Pull down to dismiss. The sheet follows the finger 1:1 (direct manipulation) through the shared
@@ -290,7 +296,7 @@ fun NowPlayingScreen(
                     miniTop = miniTopPx().takeIf { it > 0f } ?: (h - 150.dp.toPx()),
                     miniBottom = miniBottomPx().takeIf { it > 0f } ?: (h - 90.dp.toPx()),
                     insetPx = 8.dp.toPx(),
-                    cornerPx = 20.dp.toPx(),
+                    cornerPx = 36.dp.toPx(),
                 )
                 translationY = f.top
                 shape = MorphShape(
@@ -303,7 +309,7 @@ fun NowPlayingScreen(
                 alpha = SheetMorph.fade(p) * sheet.contentAlpha.value
             }
             .background(MaterialTheme.colorScheme.background)
-            .drawBehind { drawRect(artworkVerticalBrush(glow.value)) }
+            .drawBehind { if (!blurMode) drawRect(nowPlayingVerticalBrush(glow.value)) }
             // A finger landing on a moving sheet freezes it where it is (no jump); if it lifts without moving the
             // sheet, the sheet settles from there. Initial pass: nothing is consumed. Same for the queue sheet.
             .pointerInput(sheet, queueSheet) {
@@ -322,6 +328,11 @@ fun NowPlayingScreen(
             // Swallow touches so nothing behind the full-screen player can be tapped.
             .pointerInput(Unit) { detectTapGestures { } },
     ) {
+        // "Blurred cover" background (only when the user chose it): the pre-blurred picture of this song under a veil.
+        if (blurMode) com.localplayer.music.ui.components.BlurredCoverBackground(
+            image = blurred,
+            veil = com.localplayer.music.ui.components.NOW_PLAYING_BLUR_VEIL,
+        )
         // The player content: the only thing under the pull-down connection. It scales down a touch (depth cue)
         // as the queue sheet rises; read in the draw phase from the queue sheet's single float.
         Box(
@@ -340,6 +351,7 @@ fun NowPlayingScreen(
         ) {
         BoxWithConstraints(Modifier.fillMaxSize().statusBarsPadding().navigationBarsPadding()) {
             val minHeight = maxHeight
+            val pageWidth = maxWidth
             Column(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -359,6 +371,14 @@ fun NowPlayingScreen(
                         textAlign = TextAlign.Center,
                         modifier = Modifier.weight(1f),
                     )
+                    var outputOpen by remember { mutableStateOf(false) }
+                    if (outputOpen) com.localplayer.music.ui.components.OutputSheet(onDismiss = { outputOpen = false })
+                    IconButton(
+                        onClick = { outputOpen = true },
+                        modifier = Modifier.size(48.dp),
+                    ) {
+                        Icon(AppIcons.Cast, contentDescription = stringResource(R.string.audio_output))
+                    }
                     IconButton(onClick = { queueSheet.open() }, modifier = Modifier.size(48.dp)) {
                         Icon(
                             AppIcons.Queue,
@@ -367,6 +387,14 @@ fun NowPlayingScreen(
                     }
                 }
 
+                // OPT-IN lyrics line (Settings > Lyrics), one line directly above the progress bar. Its slot must not make the
+                // page taller: the title row gives up its spare 12 dp and the artwork the rest (20 dp), so everything below the
+                // bar stays exactly where it is and the page never starts to scroll because of it.
+                val lyricsInPlayer by viewModel.settings.lyricsInPlayer.collectAsStateWithLifecycle()
+                val lyricsSlotHeight = 32.dp
+                val titleRowMin = if (lyricsInPlayer) 76.dp else 88.dp
+                val artworkWidth = pageWidth - 48.dp - (if (lyricsInPlayer) lyricsSlotHeight - 12.dp else 0.dp)
+
                 // Next = content moves left; Previous = content moves right. Derived from the queue index, which
                 // arrives in the same state emission as the new track, so it is correct when the transition starts.
                 val trackMotion = remember { TrackMotion() }
@@ -374,7 +402,20 @@ fun NowPlayingScreen(
                     trackMotion.forward = state.queueIndex >= trackMotion.lastIndex
                     trackMotion.lastIndex = state.queueIndex
                 }
-                // The ONLY animated block: artwork + metadata.
+                // Cover carousel: the covers of the whole queue side by side. The cover follows the finger, the song changes
+                // when the swipe has settled, and Next / Previous (or a queue tap) slide it with a soft spring.
+                Spacer(Modifier.height(8.dp))
+                CoverCarousel(
+                    viewModel = viewModel,
+                    queueIndex = state.queueIndex,
+                    queueSize = state.queueSize,
+                    fallback = now,
+                    width = artworkWidth,
+                    reduceMotion = reduceMotion,
+                    onClick = onOpenLyrics,
+                )
+                Spacer(Modifier.height(20.dp))
+                // Animated block: the title, artist and buttons of the current track.
                 AnimatedContent(
                     targetState = now,
                     contentKey = { it.mediaId },
@@ -386,41 +427,32 @@ fun NowPlayingScreen(
                     label = "nowPlayingTrack",
                 ) { track ->
                     Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                        Spacer(Modifier.height(8.dp))
-                        // Squircle artwork; always square at the same width, so its height never changes.
-                        ArtworkImage(
-                            artwork = track.artwork,
-                            size = 320.dp,
-                            cornerRadius = 64.dp,
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .aspectRatio(1f)
-                                .clickable(onClickLabel = stringResource(R.string.lyrics), onClick = onOpenLyrics),
-                        )
-                        Spacer(Modifier.height(20.dp))
-                        Row(Modifier.fillMaxWidth().heightIn(min = 88.dp), verticalAlignment = Alignment.CenterVertically) {
+                        Row(Modifier.fillMaxWidth().heightIn(min = titleRowMin), verticalAlignment = Alignment.CenterVertically) {
                             Column(Modifier.weight(1f)) {
                                 val labelColor = controlColor(ControlColorGroup.NOW_PLAYING_TEXT)
                                 Text(
                                     track.title,
-                                    style = MaterialTheme.typography.titleLarge.songTitleFont(),
+                                    style = (if (hideChip) MaterialTheme.typography.headlineSmall else MaterialTheme.typography.titleLarge).songTitleFont(),
                                     color = labelColor ?: Color.Unspecified,
                                     maxLines = 1,
                                     overflow = TextOverflow.Ellipsis,
                                 )
+                                // A tap on the artist or the album opens it (the player closes first).
                                 Text(
                                     track.artist,
-                                    style = MaterialTheme.typography.bodyLarge.artistFont(),
+                                    style = (if (hideChip) MaterialTheme.typography.titleMedium else MaterialTheme.typography.bodyLarge).artistFont(),
                                     color = labelColor ?: MaterialTheme.colorScheme.onSurfaceVariant,
                                     maxLines = 1,
                                     overflow = TextOverflow.Ellipsis,
+                                    modifier = Modifier.clickable { onMenuAction(NowPlayingAction.GoToArtist, track) },
                                 )
                                 Text(
                                     track.album,
-                                    style = MaterialTheme.typography.bodySmall.albumGenreFont(),
+                                    style = (if (hideChip) MaterialTheme.typography.bodyMedium else MaterialTheme.typography.bodySmall).albumGenreFont(),
                                     color = labelColor ?: MaterialTheme.colorScheme.onSurfaceVariant,
                                     maxLines = 1,
                                     overflow = TextOverflow.Ellipsis,
+                                    modifier = Modifier.clickable { onMenuAction(NowPlayingAction.GoToAlbum, track) },
                                 )
                             }
                             FavoriteButton(viewModel, track.uri)
@@ -429,6 +461,17 @@ fun NowPlayingScreen(
                     }
                 }
 
+                // OPT-IN (Settings > Lyrics): the current line of synchronized lyrics, one line in a fixed-height slot above the progress bar.
+                if (lyricsInPlayer) {
+                    val lyricsFill by viewModel.settings.lyricsFill.collectAsStateWithLifecycle()
+                    com.localplayer.music.ui.components.NowPlayingLyricLine(
+                        viewModel = viewModel,
+                        trackId = now.mediaId.toLongOrNull(),
+                        isPlaying = state.isPlaying,
+                        fill = lyricsFill,
+                        modifier = Modifier.height(lyricsSlotHeight),
+                    )
+                }
                 WaveSeekBar(
                     fraction = { smooth.floatValue },
                     semanticFraction = fraction,
@@ -451,8 +494,9 @@ fun NowPlayingScreen(
                     Text(formatDuration((fraction * duration).toLong()), style = MaterialTheme.typography.labelMedium, color = timeColor)
                     Text(formatDuration(duration), style = MaterialTheme.typography.labelMedium, color = timeColor)
                 }
-                // Fixed-height slot, so the chip appearing later never moves the controls.
-                Box(Modifier.fillMaxWidth().heightIn(min = 44.dp), contentAlignment = Alignment.Center) {
+                // Fixed-height slot, so the chip appearing later never moves the controls. With the chip switched off the
+                // slot is not left empty: the text above is bigger and the space goes to the controls instead.
+                Box(Modifier.fillMaxWidth().heightIn(min = if (hideChip) 28.dp else 44.dp), contentAlignment = Alignment.Center) {
                     specs?.let {
                         Surface(shape = MaterialTheme.shapes.extraLarge, color = MaterialTheme.colorScheme.surfaceContainerHigh) {
                             Text(
@@ -474,6 +518,8 @@ fun NowPlayingScreen(
                     onPrevious = viewModel::previous,
                     onPlayPause = viewModel::togglePlayPause,
                     onNext = viewModel::next,
+                    previousVotes = jamProposal?.takeIf { it.action == com.localplayer.music.jam.JamAction.PREVIOUS }?.yes?.size ?: 0,
+                    nextVotes = jamProposal?.takeIf { it.action == com.localplayer.music.jam.JamAction.NEXT }?.yes?.size ?: 0,
                 )
                 Spacer(Modifier.height(20.dp))
 
@@ -643,14 +689,21 @@ private fun TransportButtons(
     onPrevious: () -> Unit,
     onPlayPause: () -> Unit,
     onNext: () -> Unit,
+    /** Jam: number of yes votes for "previous" / "next" while such a vote is open (0 = none, nothing is shown). */
+    previousVotes: Int = 0,
+    nextVotes: Int = 0,
 ) {
     val reduceMotion = LocalReduceMotion.current
     val previousSource = remember { MutableInteractionSource() }
     val playSource = remember { MutableInteractionSource() }
-    val nextSource = remember { MutableInteractionSource() }
-    val previousPressed by previousSource.collectIsPressedAsState()
-    val playPressed by playSource.collectIsPressedAsState()
-    val nextPressed by nextSource.collectIsPressedAsState()
+    val nextSource = remember(hasNext) { MutableInteractionSource() }
+    // The "pressed" state of each button is tracked by watching the finger itself (see TransportPill), NOT by the
+    // click source: a press that was cut short (sheet drag taking over, button disabled, many quick taps) can leave
+    // the click source "pressed" forever and keep a button wide. Here a press always ends when the finger lifts.
+    var previousPressed by remember { mutableStateOf(false) }
+    var playPressed by remember { mutableStateOf(false) }
+    var nextPressedRaw by remember(hasNext) { mutableStateOf(false) }
+    val nextPressed = nextPressedRaw && hasNext
     val anyPressed = previousPressed || playPressed || nextPressed
 
     @Composable
@@ -687,8 +740,10 @@ private fun TransportButtons(
             shape = CircleShape,
             enabled = true,
             source = previousSource,
+            onPressedChange = { previousPressed = it },
             onClick = onPrevious,
             modifier = Modifier.weight(weightFor(previousPressed)),
+            badge = previousVotes,
         )
         TransportPill(
             icon = if (isPlaying) AppIcons.Pause else AppIcons.Play,
@@ -698,6 +753,7 @@ private fun TransportButtons(
             shape = RoundedCornerShape(percent = playCorner.value.roundToInt().coerceIn(0, 50)),
             enabled = true,
             source = playSource,
+            onPressedChange = { playPressed = it },
             onClick = onPlayPause,
             modifier = Modifier.weight(weightFor(playPressed)),
             iconSize = 36.dp,
@@ -710,8 +766,10 @@ private fun TransportButtons(
             shape = CircleShape,
             enabled = hasNext,
             source = nextSource,
+            onPressedChange = { nextPressedRaw = it },
             onClick = onNext,
             modifier = Modifier.weight(weightFor(nextPressed)),
+            badge = nextVotes,
         )
     }
 }
@@ -725,13 +783,32 @@ private fun TransportPill(
     shape: androidx.compose.ui.graphics.Shape,
     enabled: Boolean,
     source: MutableInteractionSource,
+    onPressedChange: (Boolean) -> Unit,
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
     iconSize: androidx.compose.ui.unit.Dp = 30.dp,
+    /** Jam: the number of yes votes shown under the icon (0 = nothing). */
+    badge: Int = 0,
 ) {
+    val pressedCallback by androidx.compose.runtime.rememberUpdatedState(onPressedChange)
     Box(
         modifier = modifier
             .height(72.dp)
+            // Watches the finger only (never consumes anything). The press always ends: finger up, the gesture
+            // being cancelled, the button leaving the screen, or a 3 s safety limit.
+            .pointerInput(Unit) {
+                awaitEachGesture {
+                    awaitFirstDown(requireUnconsumed = false, pass = PointerEventPass.Initial)
+                    pressedCallback(true)
+                    try {
+                        withTimeoutOrNull(3_000L) {
+                            waitForUpOrCancellation(PointerEventPass.Initial)
+                        }
+                    } finally {
+                        pressedCallback(false)
+                    }
+                }
+            }
             .graphicsLayer { alpha = if (enabled) 1f else 0.38f }
             .clip(shape)
             .background(container)
@@ -746,6 +823,14 @@ private fun TransportPill(
         contentAlignment = Alignment.Center,
     ) {
         Icon(icon, contentDescription = null, tint = tint, modifier = Modifier.size(iconSize))
+        if (badge > 0) {
+            Text(
+                badge.toString(),
+                style = MaterialTheme.typography.labelLarge,
+                color = tint,
+                modifier = Modifier.align(Alignment.BottomCenter).padding(bottom = 6.dp),
+            )
+        }
     }
 }
 
@@ -778,17 +863,22 @@ fun FavoriteButton(viewModel: LibraryViewModel, trackUri: String?) {
 
 @Composable
 internal fun sleepLabel(state: SleepTimerState): String {
-    val remaining by produceState(initialValue = 0L, state) {
+    val lifecycleOwner = LocalLifecycleOwner.current
+    val remaining by produceState(initialValue = 0L, state, lifecycleOwner) {
         if (state is SleepTimerState.Counting) {
-            while (true) {
-                value = (state.endsAtElapsedMs - SystemClock.elapsedRealtime()).coerceAtLeast(0L)
-                delay(1_000) // only while this screen is composed
+            // Ticks only while the screen is visible (STARTED): nothing wakes up every second in the background.
+            lifecycleOwner.lifecycle.repeatOnLifecycle(Lifecycle.State.STARTED) {
+                while (true) {
+                    value = (state.endsAtElapsedMs - SystemClock.elapsedRealtime()).coerceAtLeast(0L)
+                    delay(1_000)
+                }
             }
         }
     }
     return when (state) {
         SleepTimerState.Off -> stringResource(R.string.sleep_timer)
         SleepTimerState.EndOfTrack -> stringResource(R.string.sleep_end_of_song)
+        SleepTimerState.EndOfQueue -> stringResource(R.string.sleep_end_of_queue)
         is SleepTimerState.Counting -> formatDuration(remaining)
     }
 }
@@ -800,33 +890,63 @@ internal fun SleepTimerDialog(viewModel: LibraryViewModel, state: SleepTimerStat
         onDismissRequest = onDismiss,
         title = { Text(stringResource(R.string.sleep_timer)) },
         text = {
-            Column(Modifier.verticalScroll(rememberScrollState())) {
-                listOf(5, 10, 15, 20, 30, 45, 60).forEach { minutes ->
-                    TextButton(
-                        onClick = {
-                            viewModel.startSleepTimer(minutes)
-                            onDismiss()
-                        },
-                        modifier = Modifier.fillMaxWidth(),
-                    ) { Text(stringResource(R.string.sleep_minutes, minutes)) }
+            Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                // Four quick choices in a 2 x 2 grid; any other length goes through the custom field below.
+                listOf(listOf(15, 30), listOf(45, 60)).forEach { pair ->
+                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        pair.forEach { minutes ->
+                            FilledTonalButton(
+                                onClick = {
+                                    viewModel.startSleepTimer(minutes)
+                                    onDismiss()
+                                },
+                                modifier = Modifier.weight(1f),
+                            ) { Text(pluralStringResource(R.plurals.sleep_minutes, minutes, minutes), maxLines = 1) }
+                        }
+                    }
                 }
-                TextButton(
+                FilledTonalButton(
                     onClick = {
                         viewModel.startSleepTimerEndOfTrack()
                         onDismiss()
                     },
                     modifier = Modifier.fillMaxWidth(),
                 ) { Text(stringResource(R.string.sleep_end_of_song)) }
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    OutlinedTextField(
-                        value = custom,
-                        onValueChange = { custom = it.filter(Char::isDigit).take(4) },
-                        singleLine = true,
-                        label = { Text(stringResource(R.string.sleep_custom_minutes)) },
-                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-                        modifier = Modifier.weight(1f),
-                    )
-                    TextButton(
+                FilledTonalButton(
+                    onClick = {
+                        viewModel.startSleepTimerEndOfQueue()
+                        onDismiss()
+                    },
+                    modifier = Modifier.fillMaxWidth(),
+                ) { Text(stringResource(R.string.sleep_end_of_queue)) }
+                // Any other length: a small pill field and a small "Start" button on one line.
+                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Surface(
+                        shape = CircleShape,
+                        color = MaterialTheme.colorScheme.surfaceContainerHighest,
+                        modifier = Modifier.weight(1f).height(40.dp),
+                    ) {
+                        Box(Modifier.padding(horizontal = 16.dp), contentAlignment = Alignment.CenterStart) {
+                            if (custom.isEmpty()) {
+                                Text(
+                                    stringResource(R.string.sleep_custom_minutes),
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    maxLines = 1,
+                                )
+                            }
+                            BasicTextField(
+                                value = custom,
+                                onValueChange = { custom = it.filter(Char::isDigit).take(4) },
+                                singleLine = true,
+                                textStyle = MaterialTheme.typography.bodyMedium.copy(color = MaterialTheme.colorScheme.onSurface),
+                                cursorBrush = SolidColor(MaterialTheme.colorScheme.primary),
+                                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                                modifier = Modifier.fillMaxWidth(),
+                            )
+                        }
+                    }
+                    FilledTonalButton(
                         onClick = {
                             custom.toIntOrNull()?.takeIf { it > 0 }?.let {
                                 viewModel.startSleepTimer(it)
@@ -834,6 +954,7 @@ internal fun SleepTimerDialog(viewModel: LibraryViewModel, state: SleepTimerStat
                             }
                         },
                         enabled = (custom.toIntOrNull() ?: 0) > 0,
+                        modifier = Modifier.height(40.dp),
                     ) { Text(stringResource(R.string.start)) }
                 }
             }
@@ -853,7 +974,7 @@ internal fun SleepTimerDialog(viewModel: LibraryViewModel, state: SleepTimerStat
 }
 
 /** The actions of the Now Playing overflow menu (exactly these six, in this order). */
-enum class NowPlayingAction { GoToAlbum, GoToArtist, HideSong, EditTags, EditLyrics, EditCover }
+enum class NowPlayingAction { GoToAlbum, GoToArtist, HideSong, EditTags, EditLyrics, Info }
 
 /** Three vertical dots next to the heart. Every entry is wired to a real screen or action by the caller. */
 @Composable
@@ -863,12 +984,12 @@ fun NowPlayingOverflowMenu(onAction: (NowPlayingAction) -> Unit) {
         IconButton(onClick = { open = true }, modifier = Modifier.size(48.dp)) {
             Icon(AppIcons.MoreVert, contentDescription = stringResource(R.string.more_actions_cd))
         }
-        DropdownMenu(expanded = open, onDismissRequest = { open = false }) {
+        com.localplayer.music.ui.components.AppDropdownMenu(expanded = open, onDismiss = { open = false }) {
             @Composable
             fun Item(icon: androidx.compose.ui.graphics.vector.ImageVector, label: Int, action: NowPlayingAction) {
-                DropdownMenuItem(
-                    text = { Text(stringResource(label)) },
-                    leadingIcon = { Icon(icon, contentDescription = null) },
+                com.localplayer.music.ui.components.AppMenuItem(
+                    icon = icon,
+                    label = stringResource(label),
                     onClick = {
                         open = false
                         onAction(action)
@@ -880,7 +1001,7 @@ fun NowPlayingOverflowMenu(onAction: (NowPlayingAction) -> Unit) {
             Item(AppIcons.VisibilityOff, R.string.hide_song, NowPlayingAction.HideSong)
             Item(AppIcons.Edit, R.string.edit_tag, NowPlayingAction.EditTags)
             Item(AppIcons.Lyrics, R.string.edit_lyrics, NowPlayingAction.EditLyrics)
-            Item(AppIcons.Image, R.string.edit_cover, NowPlayingAction.EditCover)
+            Item(AppIcons.Info, R.string.track_info, NowPlayingAction.Info)
         }
     }
 }
@@ -901,7 +1022,87 @@ private class MorphShape(
         androidx.compose.ui.graphics.Outline.Rounded(
             androidx.compose.ui.geometry.RoundRect(
                 left, 0f, right.coerceAtLeast(left), height.coerceIn(0f, size.height),
-                androidx.compose.ui.geometry.CornerRadius(radius),
+                // Never larger than half of the window's own width / height (the closed sheet is only as tall as the mini player).
+                androidx.compose.ui.geometry.CornerRadius(
+                    radius.coerceAtMost(minOf((right - left) / 2f, height / 2f)).coerceAtLeast(0f),
+                ),
             ),
         )
+}
+
+/**
+ * The cover of the current song as a carousel over the whole queue (idea: a swipeable cover strip). Swiping moves the
+ * covers with the finger; when the swipe has settled on another cover, that queue entry is played. When the song
+ * changes by itself (Next / Previous / queue tap / end of a song) the strip glides to the new cover with a spring that
+ * does not bounce. If the queue is not available yet (or does not match the player), the single current cover is shown.
+ */
+@Composable
+private fun CoverCarousel(
+    viewModel: LibraryViewModel,
+    queueIndex: Int,
+    queueSize: Int,
+    fallback: NowPlaying,
+    width: androidx.compose.ui.unit.Dp,
+    reduceMotion: Boolean,
+    onClick: () -> Unit,
+) {
+    val queue by viewModel.queue.collectAsStateWithLifecycle()
+    val lyricsLabel = stringResource(R.string.lyrics)
+    if (queue.isEmpty() || queue.size != queueSize || queueIndex !in queue.indices) {
+        ArtworkImage(
+            artwork = fallback.artwork,
+            size = 320.dp,
+            cornerRadius = 64.dp,
+            modifier = Modifier.width(width).aspectRatio(1f).clickable(onClickLabel = lyricsLabel, onClick = onClick),
+        )
+        return
+    }
+    val pager = androidx.compose.foundation.pager.rememberPagerState(initialPage = queueIndex) { queue.size }
+    var userSwiped by remember { mutableStateOf(false) }
+    // A user swipe that settled on another cover plays that entry (only a real finger drag counts, never our own glide).
+    LaunchedEffect(pager) {
+        pager.interactionSource.interactions.collect { interaction ->
+            if (interaction is androidx.compose.foundation.interaction.DragInteraction.Start) userSwiped = true
+        }
+    }
+    LaunchedEffect(pager, queueIndex) {
+        snapshotFlow { pager.isScrollInProgress }
+            .distinctUntilChanged()
+            .filter { !it }
+            .collect {
+                if (!userSwiped) return@collect
+                userSwiped = false
+                val settled = pager.currentPage
+                if (settled != queueIndex) viewModel.playQueueIndex(settled)
+            }
+    }
+    // The player moved (Next / Previous / queue tap / song ended): glide the strip there.
+    LaunchedEffect(queueIndex) {
+        if (pager.currentPage == queueIndex || userSwiped) return@LaunchedEffect
+        val distance = kotlin.math.abs(pager.currentPage - queueIndex)
+        if (reduceMotion || distance > 2) {
+            pager.scrollToPage(queueIndex)
+        } else {
+            pager.animateScrollToPage(
+                queueIndex,
+                animationSpec = androidx.compose.animation.core.spring(
+                    dampingRatio = androidx.compose.animation.core.Spring.DampingRatioNoBouncy,
+                    stiffness = androidx.compose.animation.core.Spring.StiffnessMediumLow,
+                ),
+            )
+        }
+    }
+    androidx.compose.foundation.pager.HorizontalPager(
+        state = pager,
+        modifier = Modifier.width(width),
+        pageSpacing = 12.dp,
+        key = { index -> queue.getOrNull(index)?.occurrenceId ?: "${queue.getOrNull(index)?.mediaId}#$index" },
+    ) { page ->
+        ArtworkImage(
+            artwork = queue.getOrNull(page)?.artwork,
+            size = 320.dp,
+            cornerRadius = 64.dp,
+            modifier = Modifier.width(width).aspectRatio(1f).clickable(onClickLabel = lyricsLabel, onClick = onClick),
+        )
+    }
 }

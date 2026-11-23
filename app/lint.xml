@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<lint>
+    <!-- Deliberate decisions, each with its reason. Everything else lint reports is fixed in the code. -->
+
+    <!-- targetSdk is raised on purpose, together with testing of the new Android behaviour changes. -->
+    <issue id="OldTargetApi" severity="ignore" />
+
+    <!-- Library / Gradle updates are done by hand, one at a time, so a build never breaks by surprise. -->
+    <issue id="NewerVersionAvailable" severity="ignore" />
+    <issue id="AndroidGradlePluginVersion" severity="ignore" />
+
+    <!-- libffmpeg.so comes from the youtubedl-android library; the newer release does not start (see build.gradle.kts). -->
+    <issue id="Aligned16KB" severity="ignore" />
+</lint>

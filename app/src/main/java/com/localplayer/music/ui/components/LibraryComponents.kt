@@ -30,7 +30,6 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
-import androidx.compose.ui.graphics.Color
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -38,6 +37,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
@@ -196,9 +196,7 @@ fun DetailTopBar(
 ) {
     AppTopBar(
         leading = {
-            IconButton(onClick = onBack, modifier = Modifier.size(TopBarMetrics.ButtonSize)) {
-                Icon(AppIcons.ArrowBack, contentDescription = stringResource(R.string.back))
-            }
+            AppBackButton(onBack)
             Text(
                 text = title,
                 style = MaterialTheme.typography.titleLarge,
@@ -352,7 +350,7 @@ fun AddToPlaylistDialog(
                     items(playlists, key = { it.id }) { playlist ->
                         TextRow(
                             title = playlist.name,
-                            subtitle = stringResource(R.string.track_count, playlist.trackCount),
+                            subtitle = pluralStringResource(R.plurals.track_count, playlist.trackCount, playlist.trackCount),
                             onClick = { onPick(playlist) },
                         )
                     }

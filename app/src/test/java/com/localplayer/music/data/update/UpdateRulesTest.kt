@@ -50,7 +50,7 @@ class UpdateRulesTest {
         assertFalse(UpdateRules.isValidRepo("me/x?y=1"))
     }
 
-    @Test fun autoCheck_isLimitedToOncePerDayAndNeedsOptInAndRepo() {
+    @Test fun autoCheck_isLimitedToOncePerWeekAndNeedsOptInAndRepo() {
         val day = UpdateRules.AUTO_CHECK_INTERVAL_MS
         assertTrue(UpdateRules.shouldAutoCheck(true, true, 1000L, 0L))
         assertFalse(UpdateRules.shouldAutoCheck(false, true, 1000L, 0L))
@@ -59,5 +59,19 @@ class UpdateRulesTest {
         assertTrue(UpdateRules.shouldAutoCheck(true, true, day + 5000L, 1000L))
         // a clock that went backwards must not block checks forever
         assertTrue(UpdateRules.shouldAutoCheck(true, true, 500L, 10_000L))
+    }
+
+    @Test fun tagsWithDotAfterV_andBetaOrdering() {
+        assertTrue(VersionCompare.isValid("v.1.5.0-beta3"))
+        assertTrue(VersionCompare.isValid("V.1.5.1"))
+        assertTrue(VersionCompare.isNewer("v.1.5.0-beta3", "1.4.2"))
+        assertTrue(VersionCompare.isNewer("v1.5.0-beta4", "1.5.0-beta3"))
+        assertTrue(VersionCompare.isNewer("v.1.5.0-beta10", "v1.5.0-beta9"))
+        assertFalse(VersionCompare.isNewer("1.5.0-beta3", "1.5.0-beta4"))
+        assertFalse(VersionCompare.isNewer("1.5.0-beta3", "1.5.0-beta3"))
+        assertTrue(VersionCompare.isNewer("1.5.0-rc1", "1.5.0-beta9"))
+        assertTrue(VersionCompare.isNewer("1.5.0", "1.5.0-beta4"))
+        assertFalse(VersionCompare.isNewer("1.5.0-beta4", "1.5.0"))
+        assertTrue(VersionCompare.isNewer("1.5.1-beta1", "1.5.0"))
     }
 }
