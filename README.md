@@ -14,6 +14,7 @@ No ads. No analytics. No account.
 [![Languages](https://img.shields.io/badge/Languages-English%20%7C%20%CE%95%CE%BB%CE%BB%CE%B7%CE%BD%CE%B9%CE%BA%CE%AC-00bcd4)](#-ελληνικά)
 
 [**⬇️ Download the latest APK**](https://github.com/prodypro-mi2009/LocalPlayer/releases/latest)
+[**🌐 Website**](https://prodypro-mi2009.github.io/LocalPlayer/)
 
 </div>
 
