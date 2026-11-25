@@ -1,0 +1,7 @@
+Shuffle & History buttons that follow your finger (pill or classic row)
+Playlist from Spotify: paste a public link, create a playlist, find missing songs on YouTube
+New genre pictures; blur strength slider for the cover background
+Lyrics above the progress bar with colour fill; shift lyric times
+Duplicate finder, M3U playlists, batch tag editing, ReplayGain for albums and library
+Backup import by parts and optional weekly automatic backup
+Faster start
