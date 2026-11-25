@@ -85,11 +85,8 @@ p{margin:0}
 .chips{display:flex;flex-wrap:wrap;gap:8px;margin-top:28px;padding:0;list-style:none}
 .chips li{padding:6px 14px;border-radius:999px;background:rgba(255,255,255,.07);border:1px solid rgba(255,255,255,.1);font-size:.88rem;color:var(--muted)}
 .stage{position:relative;height:640px;display:flex;justify-content:center;align-items:center}
-.sun{position:absolute;width:520px;height:520px;border-radius:50%;top:40px;left:50%;transform:translateX(-50%);
-  background:linear-gradient(180deg,#ffd77f 0,#ffb865 55%,#f58a55 100%);
-  -webkit-mask:repeating-linear-gradient(180deg,#000 0 62%,transparent 62% 64%,#000 64% 71%,transparent 71% 74%,#000 74% 80%,transparent 80% 84%,#000 84% 88%,transparent 88% 93%,#000 93% 96%,transparent 96% 100%);
-  mask:linear-gradient(180deg,#000 0 60%,transparent 60% 62%,#000 62% 70%,transparent 70% 73%,#000 73% 80%,transparent 80% 84%,#000 84% 89%,transparent 89% 94%,#000 94% 97%,transparent 97%);
-  filter:blur(.4px);opacity:.95;box-shadow:0 0 160px 40px rgba(255,150,80,.25)}
+.sun{position:absolute;width:460px;height:460px;top:-30px;left:47%;transform:translateX(-50%);filter:drop-shadow(0 0 90px rgba(255,150,80,.35))}
+.sun svg{display:block;width:100%;height:100%}
 .stage .ph{position:absolute;filter:drop-shadow(0 28px 40px rgba(0,0,0,.55))}
 .stage .ph-a{width:260px;left:0;top:60px;transform:rotate(-7deg)}
 .stage .ph-b{width:285px;right:0;top:0;transform:rotate(5deg)}
@@ -116,9 +113,10 @@ section{padding:84px 0 0}
 .tile .shot img{width:100%;border-radius:40px 40px 0 0;box-shadow:0 -10px 50px rgba(0,0,0,.35)}
 .tile.warm{background:linear-gradient(170deg,#5a1628 0,#2a1219 70%)}
 .tile.blue{background:linear-gradient(170deg,#1c2f55 0,#1b1c23 70%)}
-.tile.wide{grid-column:span 2;flex-direction:row;align-items:flex-start;gap:20px}
-.tile.wide .txt{flex:1;padding-bottom:28px}
-.tile.wide .shot{margin:26px 0 0;width:44%;max-width:250px;align-self:flex-end}
+.tile.wide{grid-column:span 2}
+.tile.wide p{max-width:56ch}
+.shots{display:flex;justify-content:center;gap:28px;margin-top:26px}
+.shots .shot{margin:0;width:42%;max-width:250px}
 
 /* feature list */
 .feats{display:grid;grid-template-columns:repeat(3,1fr);gap:18px;margin-top:18px}
@@ -160,6 +158,15 @@ section{padding:84px 0 0}
 .net li{display:flex;justify-content:space-between;gap:16px;padding:12px 18px;border-radius:18px;background:var(--panel-2);font-size:.97rem}
 .net li em{font-style:normal;color:var(--sun);font-family:var(--dots)}
 
+/* contact */
+.contact{display:grid;grid-template-columns:1fr 1fr;gap:18px}
+.cbox{display:flex;align-items:center;gap:20px;text-decoration:none;background:var(--panel);border:1px solid rgba(255,255,255,.07);border-radius:34px;padding:28px 30px;transition:transform .2s,border-color .2s}
+.cbox:hover{transform:translateY(-3px);border-color:rgba(255,255,255,.2)}
+.cbox .ic{flex:none;width:58px;height:58px;border-radius:50%;display:flex;align-items:center;justify-content:center;background:linear-gradient(135deg,var(--ember),var(--sun));color:#3a0c1b}
+.cbox .ic svg{width:28px;height:28px}
+.cbox small{display:block;color:var(--muted);font-size:.9rem}
+.cbox strong{font-size:1.15rem;word-break:break-all}
+@media (max-width:960px){.contact{grid-template-columns:1fr}}
 /* footer */
 footer{margin-top:96px;padding:36px 0 56px;border-top:1px solid rgba(255,255,255,.08)}
 .foot{display:flex;flex-wrap:wrap;gap:20px 36px;align-items:center;justify-content:space-between}
@@ -169,7 +176,9 @@ footer{margin-top:96px;padding:36px 0 56px;border-top:1px solid rgba(255,255,255
 .fine{margin-top:20px;color:#8f8089;font-size:.88rem;max-width:70ch}
 
 .cta .btn small{font-weight:500;opacity:.8;font-size:.85em}
-.btn-star b{font-variant-numeric:tabular-nums;padding-left:10px;margin-left:2px;border-left:1px solid rgba(255,255,255,.25)}
+.starb{display:inline-flex;align-items:center;gap:6px;font-variant-numeric:tabular-nums;padding-left:14px;margin-left:4px;border-left:1px solid rgba(255,255,255,.25);color:var(--sun)}
+.starb svg{width:16px;height:16px}
+.starb[hidden]{display:none}
 .chips li.live{color:var(--sun);border-color:rgba(255,202,110,.35);background:rgba(255,202,110,.08)}
 .faq{display:grid;gap:12px;max-width:820px}
 .faq details{background:var(--panel);border:1px solid rgba(255,255,255,.07);border-radius:24px;padding:0 24px}
@@ -193,12 +202,13 @@ footer{margin-top:96px;padding:36px 0 56px;border-top:1px solid rgba(255,255,255
 @media (max-width:620px){
   body{font-size:16px}
   .bento,.feats,.steps{grid-template-columns:1fr}
-  .tile.wide{grid-column:auto;flex-direction:column}
-  .tile.wide .shot{width:74%;margin:26px auto 0}
+  .tile.wide{grid-column:auto}
+  .shots{gap:12px}
+  .shots .shot{width:46%}
   .stage{height:500px}
   .stage .ph-a{width:210px}
   .stage .ph-b{width:230px}
-  .sun{width:340px;height:340px;top:60px}
+  .sun{width:300px;height:300px;top:70px;left:40%}
   .stage .ph-a{left:-4px}
   .stage .ph-b{right:-4px}
   .nav .btn{display:none}
@@ -246,10 +256,7 @@ footer{margin-top:96px;padding:36px 0 56px;border-top:1px solid rgba(255,255,255
         <a class="btn btn-ghost" href="https://github.com/prodypro-mi2009/LocalPlayer">
           <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 .5a11.5 11.5 0 0 0-3.64 22.41c.58.1.79-.25.79-.56v-2c-3.2.7-3.88-1.37-3.88-1.37-.52-1.33-1.28-1.69-1.28-1.69-1.04-.71.08-.7.08-.7 1.16.08 1.77 1.19 1.77 1.19 1.03 1.76 2.7 1.25 3.36.96.1-.75.4-1.25.73-1.54-2.55-.29-5.24-1.28-5.24-5.69 0-1.26.45-2.28 1.19-3.09-.12-.29-.52-1.46.11-3.05 0 0 .97-.31 3.17 1.18a11 11 0 0 1 5.77 0c2.2-1.49 3.17-1.18 3.17-1.18.63 1.59.23 2.76.11 3.05.74.81 1.19 1.83 1.19 3.09 0 4.42-2.69 5.39-5.25 5.68.41.36.78 1.06.78 2.14v3.17c0 .31.21.67.8.56A11.5 11.5 0 0 0 12 .5Z"/></svg>
           <span>GitHub</span>
-        </a>
-        <a class="btn btn-ghost btn-star" href="https://github.com/prodypro-mi2009/LocalPlayer/stargazers">
-          <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="m12 2.8 2.9 5.9 6.5.9-4.7 4.6 1.1 6.5L12 17.6l-5.8 3.1 1.1-6.5L2.6 9.6l6.5-.9L12 2.8Z"/></svg>
-          <span data-i="star">Star</span><b id="star-n" hidden></b>
+          <b class="starb" id="star-wrap" hidden title="Stars on GitHub"><svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="m12 2.8 2.9 5.9 6.5.9-4.7 4.6 1.1 6.5L12 17.6l-5.8 3.1 1.1-6.5L2.6 9.6l6.5-.9L12 2.8Z"/></svg><span id="star-n"></span></b>
         </a>
       </div>
       <ul class="chips">
@@ -260,7 +267,7 @@ footer{margin-top:96px;padding:36px 0 56px;border-top:1px solid rgba(255,255,255
       </ul>
     </div>
     <div class="stage" aria-hidden="false">
-      <div class="sun" aria-hidden="true"></div>
+      <div class="sun" aria-hidden="true"><svg viewBox="0 0 100 100"><defs><clipPath id="sc"><circle cx="50" cy="50" r="50"/></clipPath></defs><circle cx="50" cy="50" r="50" fill="#ffcd6e"/><g clip-path="url(#sc)" fill="#3c0c3c"><rect x="0" y="60.5" width="100" height="1.2"/><rect x="0" y="69" width="100" height="2.2"/><rect x="0" y="77.5" width="100" height="3.2"/><rect x="0" y="85.5" width="100" height="4.2"/><rect x="0" y="93.5" width="100" height="5.2"/></g></svg></div>
       <img class="ph ph-a" src="img/01-home.png" alt="LocalPlayer Home screen with favorite songs" width="560" height="1221">
       <img class="ph ph-b" src="img/02-now-playing.png" alt="LocalPlayer Now Playing screen with a blurred cover background" width="560" height="1221">
     </div>
@@ -301,8 +308,10 @@ footer{margin-top:96px;padding:36px 0 56px;border-top:1px solid rgba(255,255,255
           <h3 data-i="t4">Genre pictures and stats</h3>
           <p data-i="d4">Genres get their own artwork from the tag, in English or Greek. Statistics show listening time, songs played and a daily average for the last 7 days.</p>
         </div>
-        <div class="shot"><img src="img/05-genres.png" alt="Genres tab with pictures" loading="lazy" width="560" height="1221"></div>
-        <div class="shot"><img src="img/07-stats.png" alt="Listening time statistics" loading="lazy" width="560" height="1221"></div>
+        <div class="shots">
+          <div class="shot"><img src="img/05-genres.png" alt="Genres tab with pictures" loading="lazy" width="560" height="1221"></div>
+          <div class="shot"><img src="img/07-stats.png" alt="Listening time statistics" loading="lazy" width="560" height="1221"></div>
+        </div>
       </article>
       <article class="tile warm">
         <h3 data-i="t5">Everything within thumb reach</h3>
@@ -410,6 +419,24 @@ footer{margin-top:96px;padding:36px 0 56px;border-top:1px solid rgba(255,255,255
     </div>
   </section>
 
+  <section id="contact">
+    <div class="sec-head">
+      <span class="kicker" data-i="k_contact">CONTACT</span>
+      <h2 data-i="h_contact">Have an idea or a problem?</h2>
+      <p data-i="s_contact">Send ideas, improvements, comments or problems. I answer every message about the app.</p>
+    </div>
+    <div class="contact">
+      <a class="cbox" href="mailto:localplayer2026@gmail.com">
+        <span class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="5" width="18" height="14" rx="3"/><path d="m4 7 8 6 8-6"/></svg></span>
+        <span><small>Email</small><strong>localplayer2026@gmail.com</strong></span>
+      </a>
+      <a class="cbox" href="https://www.instagram.com/localplayer2026/">
+        <span class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="3" width="18" height="18" rx="5"/><circle cx="12" cy="12" r="4"/><circle cx="17.3" cy="6.7" r="1" fill="currentColor"/></svg></span>
+        <span><small>Instagram</small><strong>@localplayer2026</strong></span>
+      </a>
+    </div>
+  </section>
+
 </div>
 </main>
 
@@ -421,6 +448,8 @@ footer{margin-top:96px;padding:36px 0 56px;border-top:1px solid rgba(255,255,255
         <a href="https://github.com/prodypro-mi2009/LocalPlayer">GitHub</a>
         <a href="https://github.com/prodypro-mi2009/LocalPlayer/releases">Releases</a>
         <a href="https://github.com/prodypro-mi2009/LocalPlayer/issues" data-i="issues">Report an issue</a>
+        <a href="https://www.instagram.com/localplayer2026/">Instagram</a>
+        <a href="mailto:localplayer2026@gmail.com">localplayer2026@gmail.com</a>
       </div>
     </div>
     <p class="fine" data-i="fine">Screenshots use invented demo tracks, artists, lyrics and cover art. Built with Kotlin, Jetpack Compose, Media3, yt-dlp and FFmpeg.</p>
@@ -465,7 +494,7 @@ q3:"Which phones can run it?",a3:"Android phones with an ARM64 processor (arm64-
 q4:"Do I log in with Spotify?",a4:"No. “Playlist from Spotify” only reads the link of a public playlist made by a user. Playlists made by Spotify itself (Daylist, Mix for you) and private playlists cannot be read.",
 q5:"How do I update?",a5:"The app checks GitHub once every 24 hours and tells you when a new version is out. Download the new APK from the release page and install it over the old one. The check can be turned off.",
 q6:"Found a bug or want a feature?",a6:"Open an issue on GitHub:",
-st_dl:"downloads",st_ver:"Version"},
+st_dl:"downloads of this version",st_ver:"Version",k_contact:"CONTACT",h_contact:"Have an idea or a problem?",s_contact:"Send ideas, improvements, comments or problems. I answer every message about the app."},
 el:{nav_features:"Δυνατότητες",nav_screens:"Εικόνες",nav_new:"Τι νέο υπάρχει",nav_install:"Εγκατάσταση",nav_privacy:"Απόρρητο",nav_faq:"Ερωτήσεις",star:"Αστέρι",dl_short:"Λήψη",
 eyebrow:"LOCAL-FIRST · ANDROID",h1:"Μουσική που μένει στο κινητό σου.",lead:"Το LocalPlayer παίζει τα αρχεία που ήδη έχεις. Χωρίς λογαριασμό, διαφημίσεις ή analytics.",dl:"Λήψη της τελευταίας έκδοσης APK",
 p1t:"λογαριασμοί",p1d:"Δεν χρειάζεται εγγραφή.",p2t:"διαφημίσεις",p2d:"Μόνο η μουσική σου.",p3t:"analytics",p3d:"Κανείς δεν μετράει τις ακροάσεις σου.",
@@ -502,7 +531,7 @@ q3:"Σε ποια κινητά τρέχει;",a3:"Σε κινητά Android με
 q4:"Συνδέομαι με Spotify;",a4:"Όχι. Το «Playlist από Spotify» διαβάζει μόνο τον σύνδεσμο μιας δημόσιας playlist που έχει φτιάξει χρήστης. Playlists που φτιάχνει το ίδιο το Spotify (Daylist, Mix for you) και ιδιωτικές δεν διαβάζονται.",
 q5:"Πώς ενημερώνω την εφαρμογή;",a5:"Η εφαρμογή ελέγχει το GitHub μία φορά κάθε 24 ώρες και σε ειδοποιεί όταν βγει νέα έκδοση. Κατέβασε το νέο APK από τη σελίδα της έκδοσης και εγκατάστησέ το πάνω από το παλιό. Ο έλεγχος μπορεί να κλείσει.",
 q6:"Βρήκες σφάλμα ή θες μια λειτουργία;",a6:"Άνοιξε ένα issue στο GitHub:",
-st_dl:"λήψεις",st_ver:"Έκδοση"}
+st_dl:"λήψεις αυτής της έκδοσης",st_ver:"Έκδοση",k_contact:"ΕΠΙΚΟΙΝΩΝΙΑ",h_contact:"Έχεις ιδέα ή πρόβλημα;",s_contact:"Στείλε μου ιδέες, βελτιώσεις, σχόλια ή προβλήματα. Απαντάω σε κάθε μήνυμα που αφορά την εφαρμογή."}
 };
 function setLang(l){
   var d=T[l];
@@ -520,9 +549,9 @@ if(lang==="el"){setLang("el");}
 var LIVE={};
 function renderLive(){
   var l=document.documentElement.lang==="el"?"el":"en", d=T[l];
-  if(LIVE.tag){document.getElementById("chip-ver").textContent=d.st_ver+" "+LIVE.tag.replace(/^v/,"");}
+  if(LIVE.tag){document.getElementById("chip-ver").textContent=d.st_ver+" "+LIVE.tag.replace(/^v\.?/i,"");}
   if(LIVE.dl!==undefined){var c=document.getElementById("chip-dl"); c.hidden=false; c.textContent=LIVE.dl+" "+d.st_dl;}
-  if(LIVE.stars!==undefined){var n=document.getElementById("star-n"); n.hidden=false; n.textContent=LIVE.stars;}
+  if(LIVE.stars!==undefined){document.getElementById("star-wrap").hidden=false; document.getElementById("star-n").textContent=LIVE.stars;}
   if(LIVE.apk){document.getElementById("dl-main").href=LIVE.apk; document.getElementById("dl-meta").textContent=LIVE.size?"· "+LIVE.size+" MB":"";}
 }
 var _setLang=setLang; setLang=function(l){_setLang(l); renderLive();};
@@ -535,10 +564,10 @@ var _setLang=setLang; setLang=function(l){_setLang(l); renderLive();};
     var repo=a[0],rels=a[1],tot=0,v={};
     if(typeof repo.stargazers_count==="number") v.stars=repo.stargazers_count;
     if(Array.isArray(rels)){
-      rels.forEach(function(r){(r.assets||[]).forEach(function(x){tot+=x.download_count||0;});});
-      v.dl=tot;
       var latest=rels.filter(function(r){return !r.draft&&!r.prerelease;})[0];
       if(latest){
+        (latest.assets||[]).forEach(function(x){tot+=x.download_count||0;});
+        v.dl=tot;
         v.tag=latest.tag_name;
         var apks=(latest.assets||[]).filter(function(x){return /\.apk$/i.test(x.name);});
         if(apks.length===1){v.apk=apks[0].browser_download_url; v.size=(apks[0].size/1048576).toFixed(0);}
