@@ -1,0 +1,48 @@
+<b>Your music. Your files. Nothing else.</b>
+
+LocalPlayer plays the audio files already on your phone: MP3, FLAC, M4A and AAC. There is no account, no ads and no tracking. Network features exist only when you start them yourself.
+
+<b>Playback</b>
+<ul>
+<li>Queue with Play next, Add to queue and undo</li>
+<li>Sleep timer with fade-out, equalizer and ReplayGain</li>
+<li>Home-screen widgets and media notification</li>
+<li>Continue where you left off (optional)</li>
+</ul>
+
+<b>Library</b>
+<ul>
+<li>Songs, albums, artists, genres, years, playlists, favourites and history</li>
+<li>Import and export playlists as M3U</li>
+<li>Duplicate finder (files are never deleted)</li>
+<li>Statistics and an automatic mix built from your listening</li>
+</ul>
+
+<b>Tags and lyrics</b>
+<ul>
+<li>Edit tags and cover art directly in the file, verified after saving</li>
+<li>Synchronised (LRC) and plain lyrics, with an editor and lyrics search</li>
+<li>Current lyric line above the progress bar with a colour fill (optional)</li>
+</ul>
+
+<b>Look and feel</b>
+<ul>
+<li>Light, dark and dynamic colour, backgrounds made from the album art, custom fonts</li>
+<li>English and Greek</li>
+</ul>
+
+<b>Backup</b>
+<ul>
+<li>One backup file with settings, playlists, favourites, history and statistics</li>
+<li>Choose what to restore; optional weekly automatic backup (off by default)</li>
+</ul>
+
+<b>Optional online features</b> (all started by you):
+<ul>
+<li>Lyrics search</li>
+<li>Playlist from a public Spotify link, with the missing songs looked up on YouTube (no Spotify login)</li>
+<li>Download from YouTube with yt-dlp, only for content you are allowed to download</li>
+<li>Update check from GitHub releases (off by default)</li>
+</ul>
+
+Requires Android 8.0 or newer. ARM64 devices.
